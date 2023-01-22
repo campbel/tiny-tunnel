@@ -10,7 +10,7 @@ No provided docker images, but just install from go alpine.
 docker run \
     -it \
     --rm \
-    -p 8000 \
+    -p 8000:8000 \
     --env TT_VERSION=latest \
     --env TT_SERVER_PORT=8000 \
     --name tiny-tunnel \

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -82,7 +81,7 @@ func main() {
 }
 
 func echo(port string) {
-	log.Info("starting server", log.Pair{"port", port})
+	log.Info("starting server", log.P("port", port))
 	util.Must(http.ListenAndServe(":"+port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write(types.Request{
 			Method:  r.Method,
@@ -94,7 +93,7 @@ func echo(port string) {
 }
 
 func server(port string) {
-	log.Info("starting server", log.Pair{"port", port})
+	log.Info("starting server", log.P("port", port))
 	websockerHandler := func(c chan (types.Request)) http.Handler {
 		return websocket.Handler(func(ws *websocket.Conn) {
 			for msg := range c {
@@ -121,7 +120,7 @@ func server(port string) {
 				http.Error(w, "name is already used", http.StatusBadRequest)
 				return
 			}
-			log.Info("registered tunnel", log.Pair{"name", name})
+			log.Info("registered tunnel", log.P("name", name))
 			websockerHandler(c).ServeHTTP(w, r)
 			dict.Delete(id)
 		})
@@ -159,10 +158,10 @@ func server(port string) {
 
 func client(name, target, serverHost, serverPort string, insecure bool, headers http.Header) {
 	log.Info("starting client",
-		log.Pair{"name", fmt.Sprintf(`"%s"`, name)},
-		log.Pair{"target", fmt.Sprintf(`"%s"`, target)},
-		log.Pair{"server", fmt.Sprintf(`"%s:%s"`, serverHost, serverPort)},
-		log.Pair{"insecure", strconv.FormatBool(insecure)},
+		log.P("name", name),
+		log.P("target", target),
+		log.P("server", fmt.Sprintf("%s:%s", serverHost, serverPort)),
+		log.P("insecure", insecure),
 	)
 	schemeHttp := "https"
 	schemeWs := "wss"
@@ -173,15 +172,18 @@ func client(name, target, serverHost, serverPort string, insecure bool, headers 
 	origin := schemeHttp + "://" + serverHost
 	url := schemeWs + "://" + serverHost + ":" + serverPort + "/register?name=" + name
 	go func() {
+		retries := 0
 		for {
+			time.Sleep(time.Duration(retries) * time.Second)
 			ws, err := websocket.Dial(url, "", origin)
 			if err != nil {
-				log.Info("failed to connect to server", log.Pair{"error", `"` + err.Error() + `"`})
-				time.Sleep(time.Second)
+				log.Info("failed to connect to server", log.P("error", err.Error()))
+				retries++
 				continue
 			}
+			retries = 0
+			log.Info("connected to server")
 			for {
-				log.Info("connected to server")
 				buffer := make([]byte, 1024)
 				if err := websocket.Message.Receive(ws, &buffer); err != nil {
 					break
@@ -197,7 +199,7 @@ func client(name, target, serverHost, serverPort string, insecure bool, headers 
 				}
 			}
 			log.Info("disconnected from server, reconnecting...")
-			time.Sleep(time.Second)
+			retries++
 		}
 	}()
 	util.WaitSigInt()
@@ -237,8 +239,8 @@ func do(target string, req types.Request) types.Response {
 
 func logRequestResponse(message string, req types.Request, res types.Response) {
 	log.Info(message,
-		log.Pair{"elapsed", fmt.Sprintf(`"%dms"`, time.Since(req.CreatedAt).Milliseconds())},
-		log.Pair{"request", fmt.Sprintf(`{"method":"%s","path":"%s","headers":%v}`, req.Method, req.Path, util.JSS(req.Headers))},
-		log.Pair{"response", fmt.Sprintf(`{"status":%d,"error":"%s","headers":%v}`, res.Status, res.Error, util.JSS(res.Headers))},
+		log.P("elapsed", fmt.Sprintf("%dms", time.Since(req.CreatedAt).Milliseconds())),
+		log.P("request", log.Map{"method": req.Method, "path": req.Path, "headers": req.Headers}),
+		log.P("response", log.Map{"status": res.Status, "error": res.Error, "headers": res.Headers}),
 	)
 }

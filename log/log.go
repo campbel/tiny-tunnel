@@ -2,10 +2,24 @@ package log
 
 import (
 	"fmt"
+	"strconv"
 	"time"
+
+	"github.com/campbel/tiny-tunnel/util"
 )
 
-type Pair [2]string
+// O represents a generic object
+type Map map[string]any
+
+// C represents a key/value pair
+type Pair struct {
+	Key   string
+	Value any
+}
+
+func P(k string, v any) Pair {
+	return Pair{Key: k, Value: v}
+}
 
 func Info(message string, args ...Pair) {
 	m := [][2]string{}
@@ -13,7 +27,16 @@ func Info(message string, args ...Pair) {
 	m = append(m, [2]string{"time", fmt.Sprintf(`"%s"`, time.Now().Format(time.RFC3339))})
 	m = append(m, [2]string{"message", fmt.Sprintf(`"%s"`, message)})
 	for _, v := range args {
-		m = append(m, [2]string{v[0], v[1]})
+		switch vv := v.Value.(type) {
+		case string:
+			m = append(m, [2]string{v.Key, fmt.Sprintf(`"%s"`, vv)})
+		case bool:
+			m = append(m, [2]string{v.Key, strconv.FormatBool(vv)})
+		case int:
+			m = append(m, [2]string{v.Key, strconv.Itoa(vv)})
+		default:
+			m = append(m, [2]string{v.Key, util.JSS(vv)})
+		}
 	}
 	log(m)
 }
