@@ -181,6 +181,7 @@ func client(name, target, serverHost, serverPort string, insecure bool, headers 
 				continue
 			}
 			for {
+				log.Info("connected to server")
 				buffer := make([]byte, 1024)
 				if err := websocket.Message.Receive(ws, &buffer); err != nil {
 					break
@@ -195,6 +196,7 @@ func client(name, target, serverHost, serverPort string, insecure bool, headers 
 					break
 				}
 			}
+			log.Info("disconnected from server, reconnecting...")
 			time.Sleep(time.Second)
 		}
 	}()
