@@ -9,6 +9,7 @@ import (
 )
 
 type Request struct {
+	ID           string          `json:"id,omitempty"`
 	Method       string          `json:"method,omitempty"`
 	Path         string          `json:"path,omitempty"`
 	Headers      http.Header     `json:"headers,omitempty"`

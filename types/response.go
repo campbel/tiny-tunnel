@@ -8,10 +8,11 @@ import (
 )
 
 type Response struct {
-	Status  int
-	Headers http.Header
-	Body    []byte
-	Error   string
+	ID      string      `json:"id,omitempty"`
+	Status  int         `json:"status,omitempty"`
+	Headers http.Header `json:"headers,omitempty"`
+	Body    []byte      `json:"body,omitempty"`
+	Error   string      `json:"error,omitempty"`
 }
 
 func (r Response) JSON() []byte {

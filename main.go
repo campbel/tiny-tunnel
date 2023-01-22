@@ -95,12 +95,30 @@ func echo(port string) {
 func server(port string) {
 	log.Info("starting server", log.P("port", port))
 	websockerHandler := func(c chan (types.Request)) http.Handler {
+		responseDict := sync.NewMap[string, chan (types.Response)]()
 		return websocket.Handler(func(ws *websocket.Conn) {
+			// Read responses
+			go func() {
+				for {
+					buffer := make([]byte, 1024)
+					util.Must(websocket.Message.Receive(ws, &buffer))
+					response := types.LoadResponse(buffer)
+					if responseChan, ok := responseDict.Get(response.ID); !ok {
+						log.Info("response undeliverable", log.P("id", response.ID))
+					} else {
+						responseChan <- response
+						responseDict.Delete(response.ID)
+					}
+				}
+			}()
+			// Write requests
 			for msg := range c {
+				id := util.RandString(24)
+				if !responseDict.SetNX(id, msg.ResponseChan) {
+					panic("id collision")
+				}
+				msg.ID = id
 				util.Must(websocket.Message.Send(ws, msg.JSON()))
-				buffer := make([]byte, 1024)
-				util.Must(websocket.Message.Receive(ws, &buffer))
-				msg.ResponseChan <- types.LoadResponse(buffer)
 			}
 		})
 	}
@@ -193,6 +211,7 @@ func client(name, target, serverHost, serverPort string, insecure bool, headers 
 					request.Headers[k] = v
 				}
 				response := do(target, request)
+				response.ID = request.ID
 				logRequestResponse("finished", request, response)
 				if err := websocket.Message.Send(ws, response.JSON()); err != nil {
 					break
