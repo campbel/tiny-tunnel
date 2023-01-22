@@ -83,6 +83,7 @@ func main() {
 func echo(port string) {
 	log.Info("starting server", log.P("port", port))
 	util.Must(http.ListenAndServe(":"+port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
 		w.Write(types.Request{
 			Method:  r.Method,
 			Path:    r.URL.Path,
@@ -210,12 +211,14 @@ func client(name, target, serverHost, serverPort string, insecure bool, headers 
 				for k, v := range headers {
 					request.Headers[k] = v
 				}
-				response := do(target, request)
-				response.ID = request.ID
-				logRequestResponse("finished", request, response)
-				if err := websocket.Message.Send(ws, response.JSON()); err != nil {
-					break
-				}
+				go func() {
+					response := do(target, request)
+					response.ID = request.ID
+					logRequestResponse("finished", request, response)
+					if err := websocket.Message.Send(ws, response.JSON()); err != nil {
+						log.Info("failed to send response to server", log.P("error", err.Error()))
+					}
+				}()
 			}
 			log.Info("disconnected from server, reconnecting...")
 			retries++
@@ -231,7 +234,7 @@ var httpClient = func() http.Client {
 		},
 		Transport: &http.Transport{
 			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-			MaxConnsPerHost:     10,
+			MaxConnsPerHost:     100,
 			IdleConnTimeout:     10 * time.Second,
 			TLSHandshakeTimeout: 3 * time.Second,
 		},
