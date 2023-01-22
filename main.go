@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,43 +19,71 @@ import (
 	"github.com/campbel/tiny-tunnel/util"
 )
 
-const (
-	serverPort = "8000"
-)
-
 func main() {
+
+	var (
+		defaultServerPort = "8000"
+		defaultEchoPort   = "8001"
+	)
+
 	switch os.Args[1] {
 	case "server":
-		server()
+		server(util.Env("TT_SERVER_PORT", defaultServerPort))
 	case "echo":
-		echo()
+		echo(util.Env("TT_ECHO_PORT", defaultEchoPort))
 	case "client":
 		var (
-			serverHost string = "localhost:" + serverPort
-			headers    http.Header
+			target         string      = ""
+			name           string      = util.RandString(5)
+			serverHost     string      = "localhost"
+			serverPort     string      = defaultServerPort
+			serverInsecure bool        = false
+			headers        http.Header = make(http.Header)
 		)
 		for i := 2; i < len(os.Args); {
 			switch os.Args[i] {
-			case "-s", "--server":
+			case "-n", "--name":
+				name = os.Args[i+1]
+				i += 2
+			case "-p", "--server-port":
+				serverPort = os.Args[i+1]
+				i += 2
+			case "-s", "--server-host":
 				serverHost = os.Args[i+1]
 				i += 2
+			case "-k", "--insecure":
+				serverInsecure = true
+				i++
 			case "-h", "--header":
 				kv := strings.Split(os.Args[i+1], "=")
 				headers.Add(kv[0], kv[1])
 				i += 2
 			case "--help":
-				fmt.Println("Usage: tt client -s server [-h key=value]...")
+				fmt.Println("Usage: tt client [options] TARGET")
+				fmt.Println("Options:")
+				fmt.Println("  -n, --name <name>          Name of client")
+				fmt.Println("  -p, --server-port <port>   Port of server")
+				fmt.Println("  -s, --server-host <host>   Host of server")
+				fmt.Println("  -k, --insecure             Disable HTTPS")
+				fmt.Println("  -h, --header <key=value>   Header to send")
+				fmt.Println("  --help                     Show this help")
+				os.Exit(0)
 				return
+			default:
+				target = os.Args[i]
+				i++
 			}
 		}
-		client(serverHost, headers)
+		client(name, target, serverHost, serverPort, serverInsecure, headers)
 	default:
-		fmt.Println("Usage: tt server|client|echo port")
+		fmt.Println("Usage: tt server|client|echo")
+		os.Exit(1)
 	}
 }
 
-func echo() {
-	util.Must(http.ListenAndServe(":"+os.Args[2], http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func echo(port string) {
+	log.Info("starting server", log.Pair{"port", port})
+	util.Must(http.ListenAndServe(":"+port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write(types.Request{
 			Method:  r.Method,
 			Path:    r.URL.Path,
@@ -64,7 +93,8 @@ func echo() {
 	})))
 }
 
-func server() {
+func server(port string) {
+	log.Info("starting server", log.Pair{"port", port})
 	websockerHandler := func(c chan (types.Request)) http.Handler {
 		return websocket.Handler(func(ws *websocket.Conn) {
 			for msg := range c {
@@ -91,11 +121,12 @@ func server() {
 				http.Error(w, "name is already used", http.StatusBadRequest)
 				return
 			}
+			log.Info("registered tunnel", log.Pair{"name", name})
 			websockerHandler(c).ServeHTTP(w, r)
 			dict.Delete(id)
 		})
 
-		http.ListenAndServe(":"+serverPort, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ListenAndServe(":"+port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if c, ok := dict.Get(r.Host); ok {
 				responseChan := make(chan (types.Response))
 				c <- types.Request{
@@ -126,13 +157,26 @@ func server() {
 	util.WaitSigInt()
 }
 
-func client(target string, headers http.Header) {
-	origin := "http://localhost"
-	url := "ws://localhost:" + serverPort + "/register?name=foobar"
+func client(name, target, serverHost, serverPort string, insecure bool, headers http.Header) {
+	log.Info("starting client",
+		log.Pair{"name", fmt.Sprintf(`"%s"`, name)},
+		log.Pair{"target", fmt.Sprintf(`"%s"`, target)},
+		log.Pair{"server", fmt.Sprintf(`"%s:%s"`, serverHost, serverPort)},
+		log.Pair{"insecure", strconv.FormatBool(insecure)},
+	)
+	schemeHttp := "https"
+	schemeWs := "wss"
+	if insecure {
+		schemeHttp = "http"
+		schemeWs = "ws"
+	}
+	origin := schemeHttp + "://" + serverHost
+	url := schemeWs + "://" + serverHost + ":" + serverPort + "/register?name=" + name
 	go func() {
 		for {
 			ws, err := websocket.Dial(url, "", origin)
 			if err != nil {
+				log.Info("failed to connect to server", log.Pair{"error", `"` + err.Error() + `"`})
 				time.Sleep(time.Second)
 				continue
 			}

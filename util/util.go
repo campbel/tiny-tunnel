@@ -1,11 +1,21 @@
 package util
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"io"
+	"log"
+	"math/big"
 	"os"
 	"os/signal"
 )
+
+func Env(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
 
 func JSS(v any) string {
 	return string(JS(v))
@@ -44,4 +54,20 @@ func WaitSigInt() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	<-c
+}
+
+func RandString(n int) string {
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = randomRune('0', 'z')
+	}
+	return string(b)
+}
+
+func randomRune(first, last rune) rune {
+	v, err := rand.Int(rand.Reader, big.NewInt(int64(last-first)))
+	if err != nil {
+		log.Println(err)
+	}
+	return rune(v.Int64()) + first
 }
