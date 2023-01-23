@@ -1,10 +1,7 @@
 package main
 
 import (
-	"bytes"
-	"crypto/tls"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -12,6 +9,7 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	tthttp "github.com/campbel/tiny-tunnel/http"
 	"github.com/campbel/tiny-tunnel/log"
 	"github.com/campbel/tiny-tunnel/opts"
 	"github.com/campbel/tiny-tunnel/sync"
@@ -184,7 +182,7 @@ func client(options types.ClientOptions) {
 					request.Headers.Add(k, v)
 				}
 				go func() {
-					response := do(options.Target, request)
+					response := tthttp.Do(options.Target, request)
 					response.ID = request.ID
 					log.Info("finished",
 						log.P("elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds())),
@@ -201,36 +199,4 @@ func client(options types.ClientOptions) {
 		}
 	}()
 	util.WaitSigInt()
-}
-
-var httpClient = func() http.Client {
-	return http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-		Transport: &http.Transport{
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-			MaxConnsPerHost:     100,
-			IdleConnTimeout:     10 * time.Second,
-			TLSHandshakeTimeout: 3 * time.Second,
-		},
-	}
-}()
-
-func do(target string, req types.Request) types.Response {
-	request, err := http.NewRequest(req.Method, target+req.Path, bytes.NewBuffer(req.Body))
-	util.Must(err)
-	request.Header = req.Headers
-	response, err := httpClient.Do(request)
-	if err != nil {
-		return types.Response{Error: err.Error()}
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	return types.Response{
-		Status:  response.StatusCode,
-		Headers: response.Header,
-		Body:    body,
-		Error:   util.ErrString(err),
-	}
 }
