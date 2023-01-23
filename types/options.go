@@ -14,13 +14,21 @@ type EchoOptions struct {
 }
 
 type ClientOptions struct {
-	Target     string            `opts:"[0]"              desc:"target to proxy"`
-	Name       string            `opts:"-n,--name"        desc:"name of the tunnel"`
-	ServerHost string            `opts:"-s,--server-host" desc:"server hostname"                  default:"tt.campbel.io"`
-	ServerPort string            `opts:"-p,--server-port" desc:"server port"                      default:"443"`
-	Insecure   bool              `opts:"-k,--insecure"    desc:"use insecure HTTP and WebSockets" default:"false"`
-	AllowIPs   []string          `opts:"-a,--allow-ip"    desc:"IP CIDR ranges to allow"          default:"0.0.0.0/0,::/0"`
-	Headers    map[string]string `opts:"-h,--header"      desc:"headers to add to requests"`
+	Target     string            `json:"target"      opts:"[0]"              desc:"target to proxy"`
+	Name       string            `json:"name"        opts:"-n,--name"        desc:"name of the tunnel"`
+	ServerHost string            `json:"server-host" opts:"-s,--server-host" desc:"server hostname"                  default:"tt.campbel.io"`
+	ServerPort string            `json:"server-port" opts:"-p,--server-port" desc:"server port"                      default:"443"`
+	Insecure   bool              `json:"insecure"    opts:"-k,--insecure"    desc:"use insecure HTTP and WebSockets" default:"false"`
+	AllowedIPs []string          `json:"allowed-ips" opts:"-a,--allow-ip"    desc:"IP CIDR ranges to allow"          default:"0.0.0.0/0,::/0"`
+	Headers    map[string]string `json:"headers"     opts:"-h,--header"      desc:"headers to add to requests"`
+}
+
+func (c ClientOptions) Origin() string {
+	return c.SchemeHTTP() + "://" + c.ServerHost
+}
+
+func (c ClientOptions) URL() string {
+	return c.SchemeWS() + "://" + c.ServerHost + ":" + c.ServerPort + "/register?name=" + c.Name
 }
 
 func (c ClientOptions) SchemeHTTP() string {
@@ -38,7 +46,7 @@ func (c ClientOptions) SchemeWS() string {
 }
 
 func (c ClientOptions) Valid() error {
-	for _, ip := range c.AllowIPs {
+	for _, ip := range c.AllowedIPs {
 		if _, _, err := net.ParseCIDR(ip); err != nil {
 			return fmt.Errorf("invalid IP CIDR range specified: %s", ip)
 		}

@@ -145,32 +145,21 @@ func server(options types.ServerOptions) {
 
 func client(options types.ClientOptions) {
 	util.Must(options.Valid())
-	log.Info("starting client",
-		log.P("name", options.Name),
-		log.P("target", options.Target),
-		log.P("server", fmt.Sprintf("%s:%s", options.ServerHost, options.ServerPort)),
-		log.P("insecure", options.Insecure),
-	)
-	origin := options.SchemeHTTP() + "://" + options.ServerHost
-	url := options.SchemeWS() + "://" + options.ServerHost + ":" + options.ServerPort + "/register?name=" + options.Name
+	log.Info("starting client", log.P("options", options))
 	go func() {
-		retries := 0
+		attempts := 0
 		for {
-			time.Sleep(time.Duration(retries) * time.Second)
-			config, err := websocket.NewConfig(url, origin)
-			if err != nil {
-				log.Info("failed to connect to server", log.P("error", err.Error()))
-				retries++
-				continue
-			}
-			config.Header[AllowIPHeader] = options.AllowIPs
+			time.Sleep(time.Duration(attempts) * time.Second)
+			attempts++
+			config, err := websocket.NewConfig(options.URL(), options.Origin())
+			util.Must(err)
+			config.Header[AllowIPHeader] = options.AllowedIPs
 			ws, err := websocket.DialConfig(config)
 			if err != nil {
 				log.Info("failed to connect to server", log.P("error", err.Error()))
-				retries++
 				continue
 			}
-			retries = 0
+			attempts = 0
 			log.Info("connected to server")
 			for {
 				buffer := make([]byte, 1024)
@@ -183,7 +172,6 @@ func client(options types.ClientOptions) {
 				}
 				go func() {
 					response := tthttp.Do(options.Target, request)
-					response.ID = request.ID
 					log.Info("finished",
 						log.P("elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds())),
 						log.P("request", log.Map{"method": request.Method, "path": request.Path, "headers": request.Headers}),
@@ -195,7 +183,6 @@ func client(options types.ClientOptions) {
 				}()
 			}
 			log.Info("disconnected from server, reconnecting...")
-			retries++
 		}
 	}()
 	util.WaitSigInt()

@@ -36,6 +36,7 @@ func Do(target string, req types.Request) types.Response {
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	return types.Response{
+		ID:      req.ID,
 		Status:  response.StatusCode,
 		Headers: response.Header,
 		Body:    body,
