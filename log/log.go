@@ -8,10 +8,8 @@ import (
 	"github.com/campbel/tiny-tunnel/util"
 )
 
-// O represents a generic object
 type Map map[string]any
 
-// C represents a key/value pair
 type Pair struct {
 	Key   string
 	Value any
