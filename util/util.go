@@ -3,11 +3,15 @@ package util
 import (
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"math/big"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 )
 
 func Env(key, def string) string {
@@ -36,11 +40,12 @@ func ErrString(err error) string {
 
 func Must(err error) {
 	if err == io.EOF {
-		os.Exit(0)
+		os.Exit(2)
 		return
 	}
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
+		os.Exit(3)
 	}
 }
 
@@ -70,4 +75,24 @@ func randomRune(first, last rune) rune {
 		log.Println(err)
 	}
 	return rune(v.Int64()) + first
+}
+
+func AllowedIP(r *http.Request, allowedIPs []string) bool {
+	if len(allowedIPs) == 0 {
+		return true
+	}
+	ips := append(r.Header["X-Forwarded-For"], strings.Split(r.RemoteAddr, ":")[0])
+	for _, allowedIP := range allowedIPs {
+		_, n, err := net.ParseCIDR(allowedIP)
+		if err != nil {
+			continue
+		}
+		for _, ip := range ips {
+			pip := net.ParseIP(ip)
+			if n.Contains(pip) {
+				return true
+			}
+		}
+	}
+	return false
 }

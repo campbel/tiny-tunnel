@@ -19,6 +19,10 @@ import (
 	"github.com/campbel/tiny-tunnel/util"
 )
 
+var (
+	AllowIPHeader = http.CanonicalHeaderKey("X-TT-Allow-IP")
+)
+
 func help() {
 	fmt.Println("Usage: " + os.Args[0] + " [server|echo|client] [options]")
 	os.Exit(1)
@@ -34,7 +38,7 @@ func main() {
 	case "server":
 		server(opts.MustParse[types.ServerOptions](os.Args[:2], os.Args[2:]).Port)
 	case "echo":
-		echo(opts.MustParse[types.ServerOptions](os.Args[:2], os.Args[2:]).Port)
+		echo(opts.MustParse[types.EchoOptions](os.Args[:2], os.Args[2:]).Port)
 	case "client":
 		client(opts.MustParse[types.ClientOptions](os.Args[:2], os.Args[2:]))
 	default:
@@ -87,7 +91,7 @@ func server(port string) {
 	}
 
 	go func() {
-		dict := sync.NewMap[string, chan (types.Request)]()
+		dict := sync.NewMap[string, types.Tunnel]()
 		mux := http.NewServeMux()
 		mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 			name := r.FormValue("name")
@@ -97,7 +101,7 @@ func server(port string) {
 			}
 			id := name + "." + r.Host
 			c := make(chan (types.Request))
-			if !dict.SetNX(id, c) {
+			if !dict.SetNX(id, types.Tunnel{ID: id, C: c, AllowedIPs: r.Header[AllowIPHeader]}) {
 				http.Error(w, "name is already used", http.StatusBadRequest)
 				return
 			}
@@ -107,9 +111,13 @@ func server(port string) {
 		})
 
 		http.ListenAndServe(":"+port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if c, ok := dict.Get(r.Host); ok {
+			if tunnel, ok := dict.Get(r.Host); ok {
+				if !util.AllowedIP(r, tunnel.AllowedIPs) {
+					http.Error(w, "gtfo", http.StatusForbidden)
+					return
+				}
 				responseChan := make(chan (types.Response))
-				c <- types.Request{
+				tunnel.C <- types.Request{
 					Method:       r.Method,
 					Path:         r.URL.Path,
 					Headers:      r.Header,
@@ -138,6 +146,7 @@ func server(port string) {
 }
 
 func client(options types.ClientOptions) {
+	util.Must(options.Valid())
 	log.Info("starting client",
 		log.P("name", options.Name),
 		log.P("target", options.Target),
@@ -150,7 +159,14 @@ func client(options types.ClientOptions) {
 		retries := 0
 		for {
 			time.Sleep(time.Duration(retries) * time.Second)
-			ws, err := websocket.Dial(url, "", origin)
+			config, err := websocket.NewConfig(url, origin)
+			if err != nil {
+				log.Info("failed to connect to server", log.P("error", err.Error()))
+				retries++
+				continue
+			}
+			config.Header[AllowIPHeader] = options.AllowIPs
+			ws, err := websocket.DialConfig(config)
 			if err != nil {
 				log.Info("failed to connect to server", log.P("error", err.Error()))
 				retries++
