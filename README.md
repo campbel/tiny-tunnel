@@ -17,5 +17,5 @@ docker run \
     golang:alpine \
     /bin/sh -c "go install \
     github.com/campbel/tiny-tunnel@\$TT_VERSION && \
-    tiny-tunnel server"
+    tiny-tunnel server -p \$TT_SERVER_PORT"
 ```

@@ -13,70 +13,32 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/campbel/tiny-tunnel/log"
+	"github.com/campbel/tiny-tunnel/opts"
 	"github.com/campbel/tiny-tunnel/sync"
 	"github.com/campbel/tiny-tunnel/types"
 	"github.com/campbel/tiny-tunnel/util"
 )
 
+func help() {
+	fmt.Println("Usage: " + os.Args[0] + " [server|echo|client] [options]")
+	os.Exit(1)
+}
+
 func main() {
 
-	var (
-		defaultServerPort = "8000"
-		defaultEchoPort   = "8001"
-	)
+	if len(os.Args) < 2 {
+		help()
+	}
 
-	switch os.Args[1] {
+	switch strings.ToLower(os.Args[1]) {
 	case "server":
-		server(util.Env("TT_SERVER_PORT", defaultServerPort))
+		server(opts.MustParse[types.ServerOptions](os.Args[:2], os.Args[2:]).Port)
 	case "echo":
-		echo(util.Env("TT_ECHO_PORT", defaultEchoPort))
+		echo(opts.MustParse[types.ServerOptions](os.Args[:2], os.Args[2:]).Port)
 	case "client":
-		var (
-			target         string      = ""
-			name           string      = util.RandString(5)
-			serverHost     string      = "localhost"
-			serverPort     string      = defaultServerPort
-			serverInsecure bool        = false
-			headers        http.Header = make(http.Header)
-		)
-		for i := 2; i < len(os.Args); {
-			switch os.Args[i] {
-			case "-n", "--name":
-				name = os.Args[i+1]
-				i += 2
-			case "-p", "--server-port":
-				serverPort = os.Args[i+1]
-				i += 2
-			case "-s", "--server-host":
-				serverHost = os.Args[i+1]
-				i += 2
-			case "-k", "--insecure":
-				serverInsecure = true
-				i++
-			case "-h", "--header":
-				kv := strings.Split(os.Args[i+1], "=")
-				headers.Add(kv[0], kv[1])
-				i += 2
-			case "--help":
-				fmt.Println("Usage: tt client [options] TARGET")
-				fmt.Println("Options:")
-				fmt.Println("  -n, --name <name>          Name of client")
-				fmt.Println("  -p, --server-port <port>   Port of server")
-				fmt.Println("  -s, --server-host <host>   Host of server")
-				fmt.Println("  -k, --insecure             Disable HTTPS")
-				fmt.Println("  -h, --header <key=value>   Header to send")
-				fmt.Println("  --help                     Show this help")
-				os.Exit(0)
-				return
-			default:
-				target = os.Args[i]
-				i++
-			}
-		}
-		client(name, target, serverHost, serverPort, serverInsecure, headers)
+		client(opts.MustParse[types.ClientOptions](os.Args[:2], os.Args[2:]))
 	default:
-		fmt.Println("Usage: tt server|client|echo")
-		os.Exit(1)
+		help()
 	}
 }
 
@@ -175,21 +137,15 @@ func server(port string) {
 	util.WaitSigInt()
 }
 
-func client(name, target, serverHost, serverPort string, insecure bool, headers http.Header) {
+func client(options types.ClientOptions) {
 	log.Info("starting client",
-		log.P("name", name),
-		log.P("target", target),
-		log.P("server", fmt.Sprintf("%s:%s", serverHost, serverPort)),
-		log.P("insecure", insecure),
+		log.P("name", options.Name),
+		log.P("target", options.Target),
+		log.P("server", fmt.Sprintf("%s:%s", options.ServerHost, options.ServerPort)),
+		log.P("insecure", options.Insecure),
 	)
-	schemeHttp := "https"
-	schemeWs := "wss"
-	if insecure {
-		schemeHttp = "http"
-		schemeWs = "ws"
-	}
-	origin := schemeHttp + "://" + serverHost
-	url := schemeWs + "://" + serverHost + ":" + serverPort + "/register?name=" + name
+	origin := options.SchemeHTTP() + "://" + options.ServerHost
+	url := options.SchemeWS() + "://" + options.ServerHost + ":" + options.ServerPort + "/register?name=" + options.Name
 	go func() {
 		retries := 0
 		for {
@@ -208,13 +164,17 @@ func client(name, target, serverHost, serverPort string, insecure bool, headers 
 					break
 				}
 				request := types.LoadRequest(buffer)
-				for k, v := range headers {
-					request.Headers[k] = v
+				for k, v := range options.Headers {
+					request.Headers.Add(k, v)
 				}
 				go func() {
-					response := do(target, request)
+					response := do(options.Target, request)
 					response.ID = request.ID
-					logRequestResponse("finished", request, response)
+					log.Info("finished",
+						log.P("elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds())),
+						log.P("request", log.Map{"method": request.Method, "path": request.Path, "headers": request.Headers}),
+						log.P("response", log.Map{"status": response.Status, "error": response.Error, "headers": response.Headers}),
+					)
 					if err := websocket.Message.Send(ws, response.JSON()); err != nil {
 						log.Info("failed to send response to server", log.P("error", err.Error()))
 					}
@@ -257,12 +217,4 @@ func do(target string, req types.Request) types.Response {
 		Body:    body,
 		Error:   util.ErrString(err),
 	}
-}
-
-func logRequestResponse(message string, req types.Request, res types.Response) {
-	log.Info(message,
-		log.P("elapsed", fmt.Sprintf("%dms", time.Since(req.CreatedAt).Milliseconds())),
-		log.P("request", log.Map{"method": req.Method, "path": req.Path, "headers": req.Headers}),
-		log.P("response", log.Map{"status": res.Status, "error": res.Error, "headers": res.Headers}),
-	)
 }
