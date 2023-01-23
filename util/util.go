@@ -77,8 +77,10 @@ func AllowedIP(r *http.Request, allowedIPs []string) bool {
 	if len(allowedIPs) == 0 {
 		return true
 	}
-	ips := append(r.Header["X-Forwarded-For"], strings.Split(r.RemoteAddr, ":")[0])
+	ips := append(r.Header["X-Forwarded-For"], r.RemoteAddr[:strings.LastIndex(r.RemoteAddr, ":")])
 	for _, ip := range ips {
+		// trim brackets from IPv6 addresses
+		ip = strings.Trim(ip, "[]")
 		pip := net.ParseIP(ip)
 		if pip == nil {
 			continue

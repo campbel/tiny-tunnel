@@ -23,7 +23,7 @@ func contains(slice []string, item string) bool {
 }
 
 func MustParse[T any](usage []string, args []string) T {
-	if contains(args, "-h") || contains(args, "--help") {
+	if contains(args, "--help") {
 		fmt.Println(Help[T](usage))
 		os.Exit(0)
 	}

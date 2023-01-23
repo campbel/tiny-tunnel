@@ -99,7 +99,7 @@ func server(options types.ServerOptions) {
 				http.Error(w, "name is required", http.StatusBadRequest)
 				return
 			}
-			id := name + "." + r.Host
+			id := name + "." + strings.Split(r.Host, ":")[0]
 			c := make(chan (types.Request))
 			if !dict.SetNX(id, types.Tunnel{ID: id, C: c, AllowedIPs: r.Header[AllowIPHeader]}) {
 				http.Error(w, "name is already used", http.StatusBadRequest)
@@ -111,7 +111,7 @@ func server(options types.ServerOptions) {
 		})
 
 		http.ListenAndServe(":"+options.Port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if tunnel, ok := dict.Get(r.Host); ok {
+			if tunnel, ok := dict.Get(strings.Split(r.Host, ":")[0]); ok {
 				if !util.AllowedIP(r, tunnel.AllowedIPs) {
 					http.Error(w, "gtfo", http.StatusForbidden)
 					return

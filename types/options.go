@@ -19,7 +19,7 @@ type ClientOptions struct {
 	ServerHost string            `opts:"-s,--server-host" desc:"server hostname"                  default:"tt.campbel.io"`
 	ServerPort string            `opts:"-p,--server-port" desc:"server port"                      default:"443"`
 	Insecure   bool              `opts:"-k,--insecure"    desc:"use insecure HTTP and WebSockets" default:"false"`
-	AllowIPs   []string          `opts:"-a,--allow-ip"    desc:"IP CIDR ranges to allow"          default:"0.0.0.0/0"`
+	AllowIPs   []string          `opts:"-a,--allow-ip"    desc:"IP CIDR ranges to allow"          default:"0.0.0.0/0,::/0"`
 	Headers    map[string]string `opts:"-h,--header"      desc:"headers to add to requests"`
 }
 
