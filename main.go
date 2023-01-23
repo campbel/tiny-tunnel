@@ -156,7 +156,7 @@ func client(options types.ClientOptions) {
 			config.Header[AllowIPHeader] = options.AllowedIPs
 			ws, err := websocket.DialConfig(config)
 			if err != nil {
-				if attempts > 5 {
+				if attempts > options.ReconnectAttempts {
 					log.Info("failed to connect to server, exiting", log.P("error", err.Error()))
 					os.Exit(1)
 				}
