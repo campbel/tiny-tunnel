@@ -36,9 +36,9 @@ func main() {
 
 	switch strings.ToLower(os.Args[1]) {
 	case "server":
-		server(opts.MustParse[types.ServerOptions](os.Args[:2], os.Args[2:]).Port)
+		server(opts.MustParse[types.ServerOptions](os.Args[:2], os.Args[2:]))
 	case "echo":
-		echo(opts.MustParse[types.EchoOptions](os.Args[:2], os.Args[2:]).Port)
+		echo(opts.MustParse[types.EchoOptions](os.Args[:2], os.Args[2:]))
 	case "client":
 		client(opts.MustParse[types.ClientOptions](os.Args[:2], os.Args[2:]))
 	default:
@@ -46,9 +46,9 @@ func main() {
 	}
 }
 
-func echo(port string) {
-	log.Info("starting server", log.P("port", port))
-	util.Must(http.ListenAndServe(":"+port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func echo(options types.EchoOptions) {
+	log.Info("starting server", log.P("port", options.Port))
+	util.Must(http.ListenAndServe(":"+options.Port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 		w.Write(types.Request{
 			Method:  r.Method,
@@ -59,8 +59,8 @@ func echo(port string) {
 	})))
 }
 
-func server(port string) {
-	log.Info("starting server", log.P("port", port))
+func server(options types.ServerOptions) {
+	log.Info("starting server", log.P("port", options.Port))
 	websockerHandler := func(c chan (types.Request)) http.Handler {
 		responseDict := sync.NewMap[string, chan (types.Response)]()
 		return websocket.Handler(func(ws *websocket.Conn) {
@@ -110,7 +110,7 @@ func server(port string) {
 			dict.Delete(id)
 		})
 
-		http.ListenAndServe(":"+port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ListenAndServe(":"+options.Port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if tunnel, ok := dict.Get(r.Host); ok {
 				if !util.AllowedIP(r, tunnel.AllowedIPs) {
 					http.Error(w, "gtfo", http.StatusForbidden)

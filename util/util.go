@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -70,10 +69,7 @@ func RandString(n int) string {
 }
 
 func randomRune(first, last rune) rune {
-	v, err := rand.Int(rand.Reader, big.NewInt(int64(last-first)))
-	if err != nil {
-		log.Println(err)
-	}
+	v, _ := rand.Int(rand.Reader, big.NewInt(int64(last-first+1)))
 	return rune(v.Int64()) + first
 }
 
@@ -82,13 +78,16 @@ func AllowedIP(r *http.Request, allowedIPs []string) bool {
 		return true
 	}
 	ips := append(r.Header["X-Forwarded-For"], strings.Split(r.RemoteAddr, ":")[0])
-	for _, allowedIP := range allowedIPs {
-		_, n, err := net.ParseCIDR(allowedIP)
-		if err != nil {
+	for _, ip := range ips {
+		pip := net.ParseIP(ip)
+		if pip == nil {
 			continue
 		}
-		for _, ip := range ips {
-			pip := net.ParseIP(ip)
+		for _, allowedIP := range allowedIPs {
+			_, n, err := net.ParseCIDR(allowedIP)
+			if err != nil {
+				continue
+			}
 			if n.Contains(pip) {
 				return true
 			}
