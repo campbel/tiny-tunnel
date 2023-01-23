@@ -17,10 +17,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}",
-            "args": ["server"],
-            "env": {
-                "TT_SERVER_PORT": "8000"
-            }
+            "args": ["server", "-p", "8000"],
         },
         {
             "name": "Echo",
@@ -28,10 +25,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}",
-            "args": ["echo"],
-            "env": {
-                "TT_ECHO_PORT": "7000"
-            }
+            "args": ["echo", "-p", "7000"],
         },
         {
             "name": "Client",
@@ -41,9 +35,9 @@
             "program": "${workspaceFolder}",
             "args": [
                 "client",
-                "--name dev-tunnel",
-                "--server-host localhost",
-                "--server-port 8000",
+                "--name", "dev-tunnel",
+                "--server-host", "localhost",
+                "--server-port", "8000",
                 "--insecure",
                 "http://127.0.0.1:7000"
             ],
