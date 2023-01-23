@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -80,7 +81,7 @@ func server(options types.ServerOptions) {
 			for msg := range c {
 				id := util.RandString(24)
 				if !responseDict.SetNX(id, msg.ResponseChan) {
-					panic("id collision")
+					util.Must(errors.New("id collision"))
 				}
 				msg.ID = id
 				util.Must(websocket.Message.Send(ws, msg.JSON()))
