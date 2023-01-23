@@ -28,7 +28,12 @@ func Help[T any](usage []string, err ...error) string {
 			positionals = append(positionals, strings.ToUpper(field.Name))
 			continue
 		}
-		fmt.Fprintf(w, "  %s\t%s\t%s\n", field.Name, strings.Join(vals, ", "), description)
+		def := field.Tag.Get("default")
+		if def != "" {
+			def = "(default " + def + ")"
+		}
+
+		fmt.Fprintf(w, "  %s\t%s\t%s %s\n", strings.Join(vals, ", "), field.Type.String(), description, def)
 	}
 	w.Flush()
 	output := ""

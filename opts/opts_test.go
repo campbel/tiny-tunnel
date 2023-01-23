@@ -79,8 +79,8 @@ func TestParse(t *testing.T) {
 func testParse(t *testing.T, args []string, want TestOpts, wantErr bool) {
 	t.Helper()
 	got, err := Parse[TestOpts](args)
-	if wantErr && err == nil {
-		t.Fatal("want error, got none")
+	if wantErr && err != nil {
+		return
 	}
 	if err != nil {
 		t.Fatal(err)

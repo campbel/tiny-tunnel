@@ -13,7 +13,20 @@ func ParseArgs[T any]() (T, error) {
 	return Parse[T](os.Args[1:])
 }
 
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
 func MustParse[T any](usage []string, args []string) T {
+	if contains(args, "-h") || contains(args, "--help") {
+		fmt.Println(Help[T](usage))
+		os.Exit(0)
+	}
 	t, err := Parse[T](args)
 	if err != nil {
 		fmt.Println(Help[T](usage, err))
@@ -23,7 +36,7 @@ func MustParse[T any](usage []string, args []string) T {
 }
 
 func Parse[T any](args []string) (T, error) {
-	var t T
+	var t = WithDefaults[T]()
 	flags := getFlag[T]()
 	posIndex := 0
 	for i := 0; i < len(args); {
