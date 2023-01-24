@@ -1,2 +1,6 @@
+github.com/campbel/yoshi v0.0.0-20230124045414-20852adcf196 h1:aAfpFN9pOgC9LmcmdGqkpg7SMN8vtGx1KlzOIdh/tUA=
+github.com/campbel/yoshi v0.0.0-20230124045414-20852adcf196/go.mod h1:cxAycf56su4vrfCGKxzBY8mdtKaGOxuYK/vwGO/5wKE=
+github.com/campbel/yoshi v0.0.0-20230124051115-088489139ce1 h1:ujnPpN7zPHsZFIk4j6R0KjvOHBszX4QpFQNlYpx0JFQ=
+github.com/campbel/yoshi v0.0.0-20230124051115-088489139ce1/go.mod h1:cxAycf56su4vrfCGKxzBY8mdtKaGOxuYK/vwGO/5wKE=
 golang.org/x/net v0.5.0 h1:GyT4nK/YDHSqa1c4753ouYCDajOYKTja9Xb/OHtgvSw=
 golang.org/x/net v0.5.0/go.mod h1:DivGGAXEgPSlEBzxGzZI+ZLohi+xUj054jfeKui00ws=

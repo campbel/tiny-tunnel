@@ -4,44 +4,36 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"golang.org/x/net/websocket"
 
 	tthttp "github.com/campbel/tiny-tunnel/http"
 	"github.com/campbel/tiny-tunnel/log"
-	"github.com/campbel/tiny-tunnel/opts"
 	"github.com/campbel/tiny-tunnel/sync"
 	"github.com/campbel/tiny-tunnel/types"
 	"github.com/campbel/tiny-tunnel/util"
+	"github.com/campbel/yoshi"
 )
 
 var (
 	AllowIPHeader = http.CanonicalHeaderKey("X-TT-Allow-IP")
 )
 
-func help() {
-	fmt.Println("Usage: " + os.Args[0] + " [server|echo|client] [options]")
-	os.Exit(1)
-}
-
 func main() {
+	yoshi.App().
+		Sub("server", func(args []string) {
+			server(yoshi.MustParse[types.ServerOptions](args))
+		}).
+		Sub("echo", func(args []string) {
+			echo(yoshi.MustParse[types.EchoOptions](args))
+		}).
+		Sub("client", func(args []string) {
+			client(yoshi.MustParse[types.ClientOptions](args))
+		}).
+		Start()
 
-	if len(os.Args) < 2 {
-		help()
-	}
-
-	switch strings.ToLower(os.Args[1]) {
-	case "server":
-		server(opts.MustParse[types.ServerOptions](os.Args[:2], os.Args[2:]))
-	case "echo":
-		echo(opts.MustParse[types.EchoOptions](os.Args[:2], os.Args[2:]))
-	case "client":
-		client(opts.MustParse[types.ClientOptions](os.Args[:2], os.Args[2:]))
-	default:
-		help()
-	}
+	util.WaitSigInt()
 }
 
 func echo(options types.EchoOptions) {
@@ -115,15 +107,14 @@ func server(options types.ServerOptions) {
 				http.Error(w, "name is required", http.StatusBadRequest)
 				return
 			}
-			id := name + "." + options.Hostname
 			c := make(chan (types.Request))
-			if !dict.SetNX(id, types.Tunnel{ID: id, C: c, AllowedIPs: r.Header[AllowIPHeader]}) {
+			if !dict.SetNX(name, types.Tunnel{ID: name, C: c, AllowedIPs: r.Header[AllowIPHeader]}) {
 				http.Error(w, "name is already used", http.StatusBadRequest)
 				return
 			}
 			log.Info("registered tunnel", log.P("name", name))
 			websockerHandler(name, c).ServeHTTP(w, r)
-			dict.Delete(id)
+			dict.Delete(name)
 			log.Info("unregistered tunnel", log.P("name", name))
 		})
 
@@ -163,8 +154,6 @@ func server(options types.ServerOptions) {
 			http.Error(w, "the specified service is unavailable", http.StatusServiceUnavailable)
 		}))
 	}()
-
-	util.WaitSigInt()
 }
 
 func client(options types.ClientOptions) {
