@@ -97,3 +97,29 @@ func AllowedIP(r *http.Request, allowedIPs []string) bool {
 	}
 	return false
 }
+
+// request.Host contains the port which we don't want
+// localhost:8000 -> localhost
+//
+//	shopify.com -> shopify.com
+func getHostname(r *http.Request) string {
+	if strings.Contains(r.Host, ":") {
+		return r.Host[:strings.LastIndex(r.Host, ":")]
+	}
+	return r.Host
+}
+
+func isSubdomain(host, root string) bool {
+	return strings.HasSuffix(host, root) && host != root
+}
+
+func GetSubdomain(r *http.Request, root string) (string, bool) {
+	host := getHostname(r)
+	if !isSubdomain(host, root) {
+		return "", false
+	}
+	if host == root {
+		return "", false
+	}
+	return strings.TrimSuffix(strings.TrimSuffix(host, root), "."), true
+}

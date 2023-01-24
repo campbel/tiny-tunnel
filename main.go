@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -60,17 +59,25 @@ func echo(options types.EchoOptions) {
 
 func server(options types.ServerOptions) {
 	log.Info("starting server", log.P("port", options.Port))
-	websockerHandler := func(c chan (types.Request)) http.Handler {
+	websockerHandler := func(name string, c chan (types.Request)) http.Handler {
 		responseDict := sync.NewMap[string, chan (types.Response)]()
 		return websocket.Handler(func(ws *websocket.Conn) {
+			done := make(chan bool)
 			// Read responses
 			go func() {
+				defer func() {
+					done <- true
+					log.Info("closing reads", log.P("name", name))
+				}()
 				for {
 					buffer := make([]byte, 1024)
-					util.Must(websocket.Message.Receive(ws, &buffer))
+					if err := websocket.Message.Receive(ws, &buffer); err != nil {
+						log.Info("error reading response", log.P("err", err.Error()), log.P("name", name))
+						return
+					}
 					response := types.LoadResponse(buffer)
 					if responseChan, ok := responseDict.Get(response.ID); !ok {
-						log.Info("response undeliverable", log.P("id", response.ID))
+						log.Info("response undeliverable", log.P("id", response.ID), log.P("name", name))
 					} else {
 						responseChan <- response
 						responseDict.Delete(response.ID)
@@ -78,14 +85,24 @@ func server(options types.ServerOptions) {
 				}
 			}()
 			// Write requests
-			for msg := range c {
-				id := util.RandString(24)
-				if !responseDict.SetNX(id, msg.ResponseChan) {
-					util.Must(errors.New("id collision"))
+		LOOP:
+			for {
+				select {
+				case <-done:
+					break LOOP
+				case msg := <-c:
+					id := util.RandString(24)
+					if !responseDict.SetNX(id, msg.ResponseChan) {
+						break LOOP
+					}
+					msg.ID = id
+					if err := websocket.Message.Send(ws, msg.JSON()); err != nil {
+						log.Info("error writing request", log.P("err", err), log.P("name", name))
+						break LOOP
+					}
 				}
-				msg.ID = id
-				util.Must(websocket.Message.Send(ws, msg.JSON()))
 			}
+			log.Info("closing writes", log.P("name", name))
 		})
 	}
 
@@ -98,19 +115,25 @@ func server(options types.ServerOptions) {
 				http.Error(w, "name is required", http.StatusBadRequest)
 				return
 			}
-			id := name + "." + strings.Split(r.Host, ":")[0]
+			id := name + "." + options.Hostname
 			c := make(chan (types.Request))
 			if !dict.SetNX(id, types.Tunnel{ID: id, C: c, AllowedIPs: r.Header[AllowIPHeader]}) {
 				http.Error(w, "name is already used", http.StatusBadRequest)
 				return
 			}
 			log.Info("registered tunnel", log.P("name", name))
-			websockerHandler(c).ServeHTTP(w, r)
+			websockerHandler(name, c).ServeHTTP(w, r)
 			dict.Delete(id)
+			log.Info("unregistered tunnel", log.P("name", name))
 		})
 
 		http.ListenAndServe(":"+options.Port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if tunnel, ok := dict.Get(strings.Split(r.Host, ":")[0]); ok {
+			name, ok := util.GetSubdomain(r, options.Hostname)
+			if !ok {
+				mux.ServeHTTP(w, r)
+				return
+			}
+			if tunnel, ok := dict.Get(name); ok {
 				if !util.AllowedIP(r, tunnel.AllowedIPs) {
 					http.Error(w, "gtfo", http.StatusForbidden)
 					return
@@ -126,7 +149,7 @@ func server(options types.ServerOptions) {
 				}
 				resp := <-responseChan
 				if resp.Error != "" {
-					http.Error(w, resp.Error, http.StatusInternalServerError)
+					http.Error(w, "there was an error processing your request", http.StatusInternalServerError)
 					return
 				}
 				for k, v := range resp.Headers {
@@ -137,7 +160,7 @@ func server(options types.ServerOptions) {
 				w.Write(resp.Body)
 				return
 			}
-			mux.ServeHTTP(w, r)
+			http.Error(w, "the specified service is unavailable", http.StatusServiceUnavailable)
 		}))
 	}()
 

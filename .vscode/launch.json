@@ -17,7 +17,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}",
-            "args": ["server", "-p", "8000"],
+            "args": ["server"],
         },
         {
             "name": "Echo",
@@ -25,7 +25,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}",
-            "args": ["echo", "-p", "7000"],
+            "args": ["echo"],
         },
         {
             "name": "Client",
@@ -36,9 +36,6 @@
             "args": [
                 "client",
                 "--name", "dev-tunnel",
-                "--server-host", "localhost",
-                "--server-port", "8000",
-                "--insecure",
                 "http://127.0.0.1:7000"
             ],
         }

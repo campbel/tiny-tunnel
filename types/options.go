@@ -6,7 +6,8 @@ import (
 )
 
 type ServerOptions struct {
-	Port string `opts:"-p,--port" desc:"server port" default:"8000"`
+	Port     string `opts:"-p,--port" desc:"server port" default:"8000"`
+	Hostname string `opts:"-h,--hostname" desc:"server hostname" default:"localhost"`
 }
 
 type EchoOptions struct {
@@ -16,11 +17,11 @@ type EchoOptions struct {
 type ClientOptions struct {
 	Target            string            `json:"target"      opts:"[0]"                desc:"target to proxy"`
 	Name              string            `json:"name"        opts:"-n,--name"          desc:"name of the tunnel"`
-	ServerHost        string            `json:"server-host" opts:"-s,--server-host"   desc:"server hostname"                  default:"tt.campbel.io"`
-	ServerPort        string            `json:"server-port" opts:"-p,--server-port"   desc:"server port"                      default:"443"`
-	Insecure          bool              `json:"insecure"    opts:"-k,--insecure"      desc:"use insecure HTTP and WebSockets" default:"false"`
+	ServerHost        string            `json:"server-host" opts:"-s,--server-host"   desc:"server hostname"                  default:"localhost"`
+	ServerPort        string            `json:"server-port" opts:"-p,--server-port"   desc:"server port"                      default:"8000"`
+	Insecure          bool              `json:"insecure"    opts:"-k,--insecure"      desc:"use insecure HTTP and WebSockets" default:"true"`
 	AllowedIPs        []string          `json:"allowed-ips" opts:"-a,--allow-ip"      desc:"IP CIDR ranges to allow"          default:"0.0.0.0/0,::/0"`
-	ReconnectAttempts int               `json:"-"           opts:"-r,--max-reconnect" desc:"max reconnect attempts" default:"5"`
+	ReconnectAttempts int               `json:"-"           opts:"-r,--max-reconnect" desc:"max reconnect attempts"           default:"5"`
 	Headers           map[string]string `json:"headers"     opts:"-h,--header"        desc:"headers to add to requests"`
 }
 
