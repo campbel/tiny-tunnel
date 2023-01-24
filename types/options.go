@@ -48,6 +48,12 @@ func (c ClientOptions) SchemeWS() string {
 }
 
 func (c ClientOptions) Valid() error {
+	if c.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if c.Target == "" {
+		return fmt.Errorf("target is required")
+	}
 	for _, ip := range c.AllowedIPs {
 		if _, _, err := net.ParseCIDR(ip); err != nil {
 			return fmt.Errorf("invalid IP CIDR range specified: %s", ip)
