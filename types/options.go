@@ -5,6 +5,10 @@ import (
 	"net"
 )
 
+type GlobalOptions struct {
+	Verbose bool `opts:"-v,--verbose" desc:"verbose logging"`
+}
+
 type ServerOptions struct {
 	Port     string `opts:"-p,--port" desc:"server port" default:"8000"`
 	Hostname string `opts:"-h,--hostname" desc:"server hostname" default:"localhost"`

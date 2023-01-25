@@ -2,10 +2,16 @@ package log
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/util"
+)
+
+type Level string
+
+var (
+	LevelDebug Level = "DEBUG"
+	LevelInfo  Level = "INFO"
 )
 
 type Map map[string]any
@@ -19,33 +25,43 @@ func P(k string, v any) Pair {
 	return Pair{Key: k, Value: v}
 }
 
-func Info(message string, args ...Pair) {
-	m := [][2]string{}
-	m = append(m, [2]string{"level", `"info"`})
-	m = append(m, [2]string{"time", fmt.Sprintf(`"%s"`, time.Now().Format(time.RFC3339))})
-	m = append(m, [2]string{"message", fmt.Sprintf(`"%s"`, message)})
-	for _, v := range args {
-		switch vv := v.Value.(type) {
-		case string:
-			m = append(m, [2]string{v.Key, fmt.Sprintf(`"%s"`, vv)})
-		case bool:
-			m = append(m, [2]string{v.Key, strconv.FormatBool(vv)})
-		case int:
-			m = append(m, [2]string{v.Key, strconv.Itoa(vv)})
-		default:
-			m = append(m, [2]string{v.Key, util.JSS(vv)})
-		}
-	}
-	log(m)
+var level = LevelInfo
+
+func SetLevel(l Level) {
+	level = l
 }
 
-func log(m [][2]string) {
+func SetDebug() {
+	SetLevel(LevelDebug)
+}
+
+func Debug(message string, args ...Pair) {
+	if level == LevelDebug {
+		Msg(LevelDebug, message, args...)
+	}
+}
+
+func Info(message string, args ...Pair) {
+	Msg(LevelInfo, message, args...)
+}
+
+func Msg(level Level, message string, args ...Pair) {
 	output := `{`
-	for i, v := range m {
+	args = append([]Pair{P("level", level), P("time", time.Now().Format(time.RFC3339)), P("message", message)}, args...)
+	for i, v := range args {
 		if i > 0 {
 			output += ","
 		}
-		output += fmt.Sprintf(`"%s":%s`, v[0], v[1])
+		switch vv := v.Value.(type) {
+		case string:
+			output += fmt.Sprintf(`"%s":"%s"`, v.Key, vv)
+		case bool:
+			output += fmt.Sprintf(`"%s":%t`, v.Key, vv)
+		case int:
+			output += fmt.Sprintf(`"%s":%d`, v.Key, vv)
+		default:
+			output += fmt.Sprintf(`"%s":%s`, v.Key, util.JSS(vv))
+		}
 	}
 	output += `}`
 	fmt.Println(output)

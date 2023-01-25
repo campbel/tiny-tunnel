@@ -4,4 +4,4 @@ go 1.19
 
 require golang.org/x/net v0.5.0
 
-require github.com/campbel/yoshi v0.0.0-20230124055539-9b23bff889c7
+require github.com/campbel/yoshi v0.0.0-20230125011641-ee0a915f58c5

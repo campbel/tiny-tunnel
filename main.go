@@ -21,19 +21,23 @@ var (
 )
 
 func main() {
-	yoshi.App().
-		Sub("server", func(args []string) {
+	yoshi.App(
+		yoshi.Run(func(args yoshi.Args) {
+			options := yoshi.MustParse[types.GlobalOptions](args, "foo", "bar", "baz")
+			if options.Verbose {
+				log.SetDebug()
+			}
+		})).
+		Sub("server", yoshi.Run(func(args yoshi.Args) {
 			server(yoshi.MustParse[types.ServerOptions](args))
-		}).
-		Sub("echo", func(args []string) {
+		})).
+		Sub("echo", yoshi.Run(func(args yoshi.Args) {
 			echo(yoshi.MustParse[types.EchoOptions](args))
-		}).
-		Sub("client", func(args []string) {
+		})).
+		Sub("client", yoshi.Run(func(args yoshi.Args) {
 			client(yoshi.MustParse[types.ClientOptions](args))
-		}).
+		})).
 		Start()
-
-	util.WaitSigInt()
 }
 
 func echo(options types.EchoOptions) {
@@ -154,6 +158,7 @@ func server(options types.ServerOptions) {
 			http.Error(w, "the specified service is unavailable", http.StatusServiceUnavailable)
 		}))
 	}()
+	util.WaitSigInt()
 }
 
 func client(options types.ClientOptions) {
