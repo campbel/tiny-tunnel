@@ -40,13 +40,16 @@
             ],
         },
         {
-            "name": "Client",
+            "name": "errclient",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}",
             "args": [
-                "client"
+                "client",
+                "-k",
+                "-t", "http://localhost:7000",
+                "-n", "foobar-test"
             ],
         }
 
