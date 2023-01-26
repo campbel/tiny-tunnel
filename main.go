@@ -21,23 +21,11 @@ var (
 )
 
 func main() {
-	yoshi.App(
-		yoshi.Run(func(args yoshi.Args) {
-			options := yoshi.MustParse[types.GlobalOptions](args, "foo", "bar", "baz")
-			if options.Verbose {
-				log.SetDebug()
-			}
-		})).
-		Sub("server", yoshi.Run(func(args yoshi.Args) {
-			server(yoshi.MustParse[types.ServerOptions](args))
-		})).
-		Sub("echo", yoshi.Run(func(args yoshi.Args) {
-			echo(yoshi.MustParse[types.EchoOptions](args))
-		})).
-		Sub("client", yoshi.Run(func(args yoshi.Args) {
-			client(yoshi.MustParse[types.ClientOptions](args))
-		})).
-		Start()
+	app := new(types.YoshiApp)
+	app.Echo.Run = echo
+	app.Server.Run = server
+	app.Client.Run = client
+	yoshi.Run("tt", app)
 }
 
 func echo(options types.EchoOptions) {

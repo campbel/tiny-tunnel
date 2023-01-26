@@ -5,28 +5,44 @@ import (
 	"net"
 )
 
+type YoshiApp struct {
+	Options GlobalOptions
+	Server  struct {
+		Options ServerOptions
+		Run     func(ServerOptions)
+	}
+	Echo struct {
+		Options EchoOptions
+		Run     func(EchoOptions)
+	}
+	Client struct {
+		Options ClientOptions
+		Run     func(ClientOptions)
+	}
+}
+
 type GlobalOptions struct {
-	Verbose bool `opts:"-v,--verbose" desc:"verbose logging"`
+	Verbose bool `yoshi-flag:"-v,--verbose" yoshi-desc:"verbose logging"`
 }
 
 type ServerOptions struct {
-	Port     string `opts:"-p,--port" desc:"server port" default:"8000"`
-	Hostname string `opts:"-h,--hostname" desc:"server hostname" default:"localhost"`
+	Port     string `yoshi-flag:"-p,--port" yoshi-desc:"server port" yoshi-def:"8000"`
+	Hostname string `yoshi-flag:"-h,--hostname" yoshi-desc:"server hostname" yoshi-def:"localhost"`
 }
 
 type EchoOptions struct {
-	Port string `opts:"-p,--port" desc:"server port" default:"7000"`
+	Port string `yoshi-flag:"-p,--port" yoshi-desc:"server port" yoshi-def:"7000"`
 }
 
 type ClientOptions struct {
-	Target            string            `json:"target"      opts:"[0]"                desc:"target to proxy"`
-	Name              string            `json:"name"        opts:"-n,--name"          desc:"name of the tunnel"`
-	ServerHost        string            `json:"server-host" opts:"-s,--server-host"   desc:"server hostname"                  default:"localhost"`
-	ServerPort        string            `json:"server-port" opts:"-p,--server-port"   desc:"server port"                      default:"8000"`
-	Insecure          bool              `json:"insecure"    opts:"-k,--insecure"      desc:"use insecure HTTP and WebSockets" default:"true"`
-	AllowedIPs        []string          `json:"allowed-ips" opts:"-a,--allow-ip"      desc:"IP CIDR ranges to allow"          default:"0.0.0.0/0,::/0"`
-	ReconnectAttempts int               `json:"-"           opts:"-r,--max-reconnect" desc:"max reconnect attempts"           default:"5"`
-	Headers           map[string]string `json:"headers"     opts:"-h,--header"        desc:"headers to add to requests"`
+	Target            string            `json:"target"      yoshi-flag:"-t,--target"        yoshi-desc:"target to proxy"`
+	Name              string            `json:"name"        yoshi-flag:"-n,--name"          yoshi-desc:"name of the tunnel"`
+	ServerHost        string            `json:"server-host" yoshi-flag:"-s,--server-host"   yoshi-desc:"server hostname"                  yoshi-def:"localhost"`
+	ServerPort        string            `json:"server-port" yoshi-flag:"-p,--server-port"   yoshi-desc:"server port"                      yoshi-def:"8000"`
+	Insecure          bool              `json:"insecure"    yoshi-flag:"-k,--insecure"      yoshi-desc:"use insecure HTTP and WebSockets" yoshi-def:"true"`
+	AllowedIPs        []string          `json:"allowed-ips" yoshi-flag:"-a,--allow-ip"      yoshi-desc:"IP CIDR ranges to allow"          yoshi-def:"0.0.0.0/0,::/0"`
+	ReconnectAttempts int               `json:"-"           yoshi-flag:"-r,--max-reconnect" yoshi-desc:"max reconnect attempts"           yoshi-def:"5"`
+	Headers           map[string]string `json:"headers"     yoshi-flag:"-h,--header"        yoshi-desc:"headers to add to requests"`
 }
 
 func (c ClientOptions) Origin() string {
@@ -52,16 +68,25 @@ func (c ClientOptions) SchemeWS() string {
 }
 
 func (c ClientOptions) Valid() error {
+	var errs []error
 	if c.Name == "" {
-		return fmt.Errorf("name is required")
+		errs = append(errs, fmt.Errorf("name is required"))
 	}
 	if c.Target == "" {
-		return fmt.Errorf("target is required")
+		errs = append(errs, fmt.Errorf("target is required"))
 	}
 	for _, ip := range c.AllowedIPs {
 		if _, _, err := net.ParseCIDR(ip); err != nil {
-			return fmt.Errorf("invalid IP CIDR range specified: %s", ip)
+			errs = append(errs, fmt.Errorf("invalid IP CIDR range specified: %s", ip))
 		}
 	}
-	return nil
+	var finalErr error
+	for _, err := range errs {
+		if finalErr == nil {
+			finalErr = err
+		} else {
+			finalErr = fmt.Errorf("%w\n%s", finalErr, err)
+		}
+	}
+	return finalErr
 }

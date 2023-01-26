@@ -17,7 +17,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}",
-            "args": ["server"],
+            "args": ["server", "--port", "8000"],
         },
         {
             "name": "Echo",
@@ -25,7 +25,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}",
-            "args": ["echo"],
+            "args": ["echo", "--port", "7000"],
         },
         {
             "name": "Client",
@@ -36,20 +36,19 @@
             "args": [
                 "client",
                 "--name", "dev-tunnel",
-                "http://127.0.0.1:7000"
+                "--target", "http://localhost:7000"
             ],
         },
         {
-            "name": "errrrr",
+            "name": "Client",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}",
             "args": [
-                "client",
-                "tootoooo",
-                "qweqweqwe"
+                "client"
             ],
         }
+
     ]
 }
