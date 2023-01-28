@@ -21,11 +21,15 @@ var (
 )
 
 func main() {
-	app := new(types.YoshiApp)
-	app.Echo.Run = echo
-	app.Server.Run = server
-	app.Client.Run = client
-	yoshi.Run("tt", app)
+	err := yoshi.New("tt").Run(types.YoshiApp{
+		Server: server,
+		Echo:   echo,
+		Client: client,
+	})
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 }
 
 func echo(options types.EchoOptions) {

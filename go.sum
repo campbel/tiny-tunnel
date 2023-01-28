@@ -1,4 +1,10 @@
 github.com/campbel/yoshi v0.0.0-20230126025612-534ecd77591a h1:hHiJwlXZXhYd9/jUE9kcE1Qg4/YMaTGWUBqe1z4YYro=
 github.com/campbel/yoshi v0.0.0-20230126025612-534ecd77591a/go.mod h1:cxAycf56su4vrfCGKxzBY8mdtKaGOxuYK/vwGO/5wKE=
+github.com/campbel/yoshi v0.0.0-20230128045550-ef73e32f58a2 h1:i8oV3tTPhKD4Bv0NXjw+OWg96e6S7+wLXDmh49RYd18=
+github.com/campbel/yoshi v0.0.0-20230128045550-ef73e32f58a2/go.mod h1:BKQrWtL4D0t0BDj5ni4jSrVoDgdnoCRY4eFWFrQPbbw=
+github.com/campbel/yoshi v0.0.0-20230128051642-b6c828900477 h1:3SbrOdQXhzPct/4I9RJ52ZAKgjKiAW42FSgRuRq1RA4=
+github.com/campbel/yoshi v0.0.0-20230128051642-b6c828900477/go.mod h1:BKQrWtL4D0t0BDj5ni4jSrVoDgdnoCRY4eFWFrQPbbw=
+github.com/campbel/yoshi v0.0.0-20230128145808-71a089397f44 h1:AY/Oa47osrJP0qP8y38K7jl7/Nmyb+/9Em3rL3ZF1EQ=
+github.com/campbel/yoshi v0.0.0-20230128145808-71a089397f44/go.mod h1:BKQrWtL4D0t0BDj5ni4jSrVoDgdnoCRY4eFWFrQPbbw=
 golang.org/x/net v0.5.0 h1:GyT4nK/YDHSqa1c4753ouYCDajOYKTja9Xb/OHtgvSw=
 golang.org/x/net v0.5.0/go.mod h1:DivGGAXEgPSlEBzxGzZI+ZLohi+xUj054jfeKui00ws=
