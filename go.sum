@@ -1,5 +1,5 @@
-github.com/campbel/yoshi v0.0.0-20230128164047-aa15678c3c7c h1:djJvJQDDZ7SmiBIjQA4sWroA1pkl4mfyPLv7JXN6ejQ=
-github.com/campbel/yoshi v0.0.0-20230128164047-aa15678c3c7c/go.mod h1:BKQrWtL4D0t0BDj5ni4jSrVoDgdnoCRY4eFWFrQPbbw=
+github.com/campbel/yoshi v0.0.0-20230128233027-fa55dad4a742 h1:Ywk8u5KIldi/2d/EiE4JX/yxL0J2iXpb8qFXylPow08=
+github.com/campbel/yoshi v0.0.0-20230128233027-fa55dad4a742/go.mod h1:BKQrWtL4D0t0BDj5ni4jSrVoDgdnoCRY4eFWFrQPbbw=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/stretchr/testify v1.8.1 h1:w7B6lhMri9wdJUVmEZPGGhZzrYTPvgJArz7wNPgYKsk=

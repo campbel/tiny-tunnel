@@ -35,7 +35,6 @@ func main() {
 func echo(options types.EchoOptions) {
 	log.Info("starting server", log.P("port", options.Port))
 	util.Must(http.ListenAndServe(":"+options.Port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(100 * time.Millisecond)
 		w.Write(types.Request{
 			Method:  r.Method,
 			Path:    r.URL.Path,
