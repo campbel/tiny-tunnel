@@ -45,7 +45,7 @@ func echo(options types.EchoOptions) {
 }
 
 func server(options types.ServerOptions) {
-	log.Info("starting server", log.P("port", options.Port))
+	log.Info("starting server", log.P("port", options.ServerPort()))
 	websockerHandler := func(name string, c chan (types.Request)) http.Handler {
 		responseDict := sync.NewMap[string, chan (types.Response)]()
 		return websocket.Handler(func(ws *websocket.Conn) {
@@ -113,8 +113,8 @@ func server(options types.ServerOptions) {
 			log.Info("unregistered tunnel", log.P("name", name))
 		})
 
-		http.ListenAndServe(":"+options.Port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			name, ok := util.GetSubdomain(r, options.Hostname)
+		http.ListenAndServe(":"+options.ServerPort(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			name, ok := util.GetSubdomain(r, options.ServerHostname())
 			if !ok {
 				mux.ServeHTTP(w, r)
 				return
