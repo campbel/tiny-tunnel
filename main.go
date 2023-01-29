@@ -154,7 +154,7 @@ func server(options types.ServerOptions) {
 		}
 
 		server := &http.Server{
-			Addr:    options.Port,
+			Addr:    ":" + options.Port,
 			Handler: http.HandlerFunc(root),
 		}
 
