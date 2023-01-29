@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/net/websocket"
 
 	tthttp "github.com/campbel/tiny-tunnel/http"
@@ -45,7 +46,7 @@ func echo(options types.EchoOptions) {
 }
 
 func server(options types.ServerOptions) {
-	log.Info("starting server", log.P("port", options.ServerPort()))
+	log.Info("starting server", log.P("port", options.Port))
 	websockerHandler := func(name string, c chan (types.Request)) http.Handler {
 		responseDict := sync.NewMap[string, chan (types.Response)]()
 		return websocket.Handler(func(ws *websocket.Conn) {
@@ -96,6 +97,9 @@ func server(options types.ServerOptions) {
 	go func() {
 		dict := sync.NewMap[string, types.Tunnel]()
 		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "Welcome to Tiny Tunnel. See github.com/campbel/tiny-tunnel for more info.")
+		})
 		mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 			name := r.FormValue("name")
 			if name == "" {
@@ -113,8 +117,8 @@ func server(options types.ServerOptions) {
 			log.Info("unregistered tunnel", log.P("name", name))
 		})
 
-		http.ListenAndServe(":"+options.ServerPort(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			name, ok := util.GetSubdomain(r, options.ServerHostname())
+		root := func(w http.ResponseWriter, r *http.Request) {
+			name, ok := util.GetSubdomain(r, options.Hostname)
 			if !ok {
 				mux.ServeHTTP(w, r)
 				return
@@ -147,7 +151,25 @@ func server(options types.ServerOptions) {
 				return
 			}
 			http.Error(w, "the specified service is unavailable", http.StatusServiceUnavailable)
-		}))
+		}
+
+		server := &http.Server{
+			Addr:    options.Port,
+			Handler: http.HandlerFunc(root),
+		}
+
+		// automatic certificate creation for https
+		if options.LetsEncrypt {
+			m := &autocert.Manager{
+				Cache:  autocert.DirCache("secret-dir"),
+				Prompt: autocert.AcceptTOS,
+				Email:  "campbel@hey.com",
+			}
+			server.TLSConfig = m.TLSConfig()
+			util.Must(server.ListenAndServeTLS("", ""))
+		} else {
+			util.Must(server.ListenAndServe())
+		}
 	}()
 	util.WaitSigInt()
 }

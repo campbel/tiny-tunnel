@@ -3,7 +3,6 @@ package types
 import (
 	"fmt"
 	"net"
-	"os"
 )
 
 type YoshiApp struct {
@@ -17,24 +16,9 @@ type GlobalOptions struct {
 }
 
 type ServerOptions struct {
-	Port     string `yoshi:"-p,--port" yoshi-description:"server port" yoshi-default:"8000"`
-	Hostname string `yoshi:"-h,--hostname" yoshi-description:"server hostname" yoshi-default:"localhost"`
-}
-
-func (s ServerOptions) ServerPort() string {
-	port, ok := os.LookupEnv("TT_SERVER_PORT")
-	if ok {
-		return port
-	}
-	return s.Port
-}
-
-func (s ServerOptions) ServerHostname() string {
-	host, ok := os.LookupEnv("TT_SERVER_HOSTNAME")
-	if ok {
-		return host
-	}
-	return s.Hostname
+	Port        string `yoshi:"-p,--port" yoshi-description:"server port" yoshi-default:"8000"`
+	Hostname    string `yoshi:"-h,--hostname" yoshi-description:"server hostname" yoshi-default:"localhost"`
+	LetsEncrypt bool   `yoshi:"-l,--encrypt"`
 }
 
 type EchoOptions struct {
