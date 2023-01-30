@@ -46,7 +46,7 @@ func echo(options types.EchoOptions) {
 }
 
 func server(options types.ServerOptions) {
-	log.Info("starting server", log.P("port", options.Port))
+	log.Info("starting server", log.P("options", options))
 	websockerHandler := func(name string, c chan (types.Request)) http.Handler {
 		responseDict := sync.NewMap[string, chan (types.Response)]()
 		return websocket.Handler(func(ws *websocket.Conn) {
@@ -184,7 +184,9 @@ func client(options types.ClientOptions) {
 			attempts++
 			config, err := websocket.NewConfig(options.URL(), options.Origin())
 			util.Must(err)
-			config.Header[AllowIPHeader] = options.AllowedIPs
+			for k, v := range options.ServerHeaders {
+				config.Header.Add(k, v)
+			}
 			ws, err := websocket.DialConfig(config)
 			if err != nil {
 				if attempts > options.ReconnectAttempts {
@@ -202,7 +204,7 @@ func client(options types.ClientOptions) {
 					break
 				}
 				request := types.LoadRequest(buffer)
-				for k, v := range options.Headers {
+				for k, v := range options.TargetHeaders {
 					request.Headers.Add(k, v)
 				}
 				go func() {

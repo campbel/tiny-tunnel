@@ -16,9 +16,9 @@ type GlobalOptions struct {
 }
 
 type ServerOptions struct {
-	Port        string `yoshi:"-p,--port" yoshi-description:"server port" yoshi-default:"8000"`
-	Hostname    string `yoshi:"-h,--hostname" yoshi-description:"server hostname" yoshi-default:"localhost"`
-	LetsEncrypt bool   `yoshi:"-l,--encrypt"`
+	Port        string `json:"port"     yoshi:"-p,--port"     yoshi-description:"server port"     yoshi-default:"8000"`
+	Hostname    string `json:"hostname" yoshi:"-h,--hostname" yoshi-description:"server hostname" yoshi-default:"localhost"`
+	LetsEncrypt bool   `json:"encrypt"  yoshi:"-l,--encrypt"`
 }
 
 type EchoOptions struct {
@@ -26,14 +26,15 @@ type EchoOptions struct {
 }
 
 type ClientOptions struct {
-	Target            string            `json:"target"      yoshi:"-t,--target"        yoshi-description:"target to proxy"`
-	Name              string            `json:"name"        yoshi:"-n,--name"          yoshi-description:"name of the tunnel"`
-	ServerHost        string            `json:"server-host" yoshi:"-s,--server-host"   yoshi-description:"server hostname"                  yoshi-default:"localhost"`
-	ServerPort        string            `json:"server-port" yoshi:"-p,--server-port"   yoshi-description:"server port"                      yoshi-default:"8000"`
-	Insecure          bool              `json:"insecure"    yoshi:"-k,--insecure"      yoshi-description:"use insecure HTTP and WebSockets" yoshi-default:"true"`
-	AllowedIPs        []string          `json:"allowed-ips" yoshi:"-a,--allow-ip"      yoshi-description:"IP CIDR ranges to allow"          yoshi-default:"0.0.0.0/0,::/0"`
-	ReconnectAttempts int               `json:"-"           yoshi:"-r,--max-reconnect" yoshi-description:"max reconnect attempts"           yoshi-default:"5"`
-	Headers           map[string]string `json:"headers"     yoshi:"-h,--header"        yoshi-description:"headers to add to requests"`
+	Target            string            `json:"target"         yoshi:"-t,--target"        yoshi-description:"target to proxy"`
+	Name              string            `json:"name"           yoshi:"-n,--name"          yoshi-description:"name of the tunnel"`
+	ServerHost        string            `json:"server_host"    yoshi:"-s,--server-host"   yoshi-description:"server hostname"                  yoshi-default:"localhost"`
+	ServerPort        string            `json:"server_port"    yoshi:"-p,--server-port"   yoshi-description:"server port"                      yoshi-default:"8000"`
+	Insecure          bool              `json:"insecure"       yoshi:"-k,--insecure"      yoshi-description:"use insecure HTTP and WebSockets" yoshi-default:"true"`
+	AllowedIPs        []string          `json:"allowed_ips"    yoshi:"-a,--allow-ip"      yoshi-description:"IP CIDR ranges to allow"          yoshi-default:"0.0.0.0/0,::/0"`
+	ReconnectAttempts int               `json:"-"              yoshi:"-r,--max-reconnect" yoshi-description:"max reconnect attempts"           yoshi-default:"5"`
+	TargetHeaders     map[string]string `json:"headers"        yoshi:"-h,--header"        yoshi-description:"headers to add to requests to target"`
+	ServerHeaders     map[string]string `json:"-"              yoshi:"--server-header"    yoshi-description:"headers to add to requests to server"`
 }
 
 func (c ClientOptions) Origin() string {
