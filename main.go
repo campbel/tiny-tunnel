@@ -34,7 +34,7 @@ func main() {
 }
 
 func echo(options types.EchoOptions) {
-	log.Info("starting server", log.P("port", options.Port))
+	log.Info("starting server", "port", options.Port)
 	util.Must(http.ListenAndServe(":"+options.Port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write(types.Request{
 			Method:  r.Method,
@@ -46,7 +46,7 @@ func echo(options types.EchoOptions) {
 }
 
 func server(options types.ServerOptions) {
-	log.Info("starting server", log.P("options", options))
+	log.Info("starting server", "options", options)
 	websockerHandler := func(name string, c chan (types.Request)) http.Handler {
 		responseDict := sync.NewMap[string, chan (types.Response)]()
 		return websocket.Handler(func(ws *websocket.Conn) {
@@ -55,17 +55,17 @@ func server(options types.ServerOptions) {
 			go func() {
 				defer func() {
 					done <- true
-					log.Info("closing reads", log.P("name", name))
+					log.Info("closing reads", "name", name)
 				}()
 				for {
 					buffer := make([]byte, 1024)
 					if err := websocket.Message.Receive(ws, &buffer); err != nil {
-						log.Info("error reading response", log.P("err", err.Error()), log.P("name", name))
+						log.Info("error reading response", "err", err.Error(), "name", name)
 						return
 					}
 					response := types.LoadResponse(buffer)
 					if responseChan, ok := responseDict.Get(response.ID); !ok {
-						log.Info("response undeliverable", log.P("id", response.ID), log.P("name", name))
+						log.Info("response undeliverable", "id", response.ID, "name", name)
 					} else {
 						responseChan <- response
 						responseDict.Delete(response.ID)
@@ -85,12 +85,12 @@ func server(options types.ServerOptions) {
 					}
 					msg.ID = id
 					if err := websocket.Message.Send(ws, msg.JSON()); err != nil {
-						log.Info("error writing request", log.P("err", err), log.P("name", name))
+						log.Info("error writing request", "err", err, "name", name)
 						break LOOP
 					}
 				}
 			}
-			log.Info("closing writes", log.P("name", name))
+			log.Info("closing writes", "name", name)
 		})
 	}
 
@@ -111,10 +111,10 @@ func server(options types.ServerOptions) {
 				http.Error(w, "name is already used", http.StatusBadRequest)
 				return
 			}
-			log.Info("registered tunnel", log.P("name", name))
+			log.Info("registered tunnel", "name", name)
 			websockerHandler(name, c).ServeHTTP(w, r)
 			dict.Delete(name)
-			log.Info("unregistered tunnel", log.P("name", name))
+			log.Info("unregistered tunnel", "name", name)
 		})
 
 		root := func(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +176,7 @@ func server(options types.ServerOptions) {
 
 func client(options types.ClientOptions) {
 	util.Must(options.Valid())
-	log.Info("starting client", log.P("options", options))
+	log.Info("starting client", "options", options)
 	go func() {
 		attempts := 0
 		for {
@@ -190,10 +190,10 @@ func client(options types.ClientOptions) {
 			ws, err := websocket.DialConfig(config)
 			if err != nil {
 				if attempts > options.ReconnectAttempts {
-					log.Info("failed to connect to server, exiting", log.P("error", err.Error()))
+					log.Info("failed to connect to server, exiting", "error", err.Error())
 					os.Exit(1)
 				}
-				log.Info("failed to connect to server", log.P("error", err.Error()))
+				log.Info("failed to connect to server", "error", err.Error())
 				continue
 			}
 			attempts = 0
@@ -210,12 +210,12 @@ func client(options types.ClientOptions) {
 				go func() {
 					response := tthttp.Do(options.Target, request)
 					log.Info("finished",
-						log.P("elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds())),
-						log.P("request", log.Map{"method": request.Method, "path": request.Path, "headers": request.Headers}),
-						log.P("response", log.Map{"status": response.Status, "error": response.Error, "headers": response.Headers}),
+						"elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds()),
+						"req_method", request.Method, "req_path", request.Path, "req_headers", request.Headers,
+						"res_status", response.Status, "res_error", response.Error, "res_headers", response.Headers,
 					)
 					if err := websocket.Message.Send(ws, response.JSON()); err != nil {
-						log.Info("failed to send response to server", log.P("error", err.Error()))
+						log.Info("failed to send response to server", "error", err.Error())
 					}
 				}()
 			}
