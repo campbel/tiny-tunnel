@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -36,12 +37,14 @@ func main() {
 func echo(options types.EchoOptions) {
 	log.Info("starting server", "port", options.Port)
 	util.Must(http.ListenAndServe(":"+options.Port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(types.Request{
+		encoder := json.NewEncoder(w)
+		encoder.SetEscapeHTML(false)
+		encoder.Encode(types.Request{
 			Method:  r.Method,
-			Path:    r.URL.Path,
+			Path:    r.URL.Path + "?" + r.URL.Query().Encode(),
 			Headers: r.Header,
 			Body:    util.MustRead(r.Body),
-		}.JSON())
+		})
 	})))
 }
 
@@ -131,7 +134,7 @@ func server(options types.ServerOptions) {
 				responseChan := make(chan (types.Response))
 				tunnel.C <- types.Request{
 					Method:       r.Method,
-					Path:         r.URL.Path,
+					Path:         r.URL.Path + "?" + r.URL.Query().Encode(),
 					Headers:      r.Header,
 					Body:         util.MustRead(r.Body),
 					CreatedAt:    time.Now(),
