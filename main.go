@@ -150,6 +150,7 @@ func server(options types.ServerOptions) {
 						w.Header().Add(k, v)
 					}
 				}
+				w.WriteHeader(resp.Status)
 				w.Write(resp.Body)
 				return
 			}
