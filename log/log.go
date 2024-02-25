@@ -23,3 +23,11 @@ func Debug(message string, args ...any) {
 func Info(message string, args ...any) {
 	logger.Info(message, args...)
 }
+
+func Warn(message string, args ...any) {
+	logger.Warn(message, args...)
+}
+
+func Error(message string, args ...any) {
+	logger.Error(message, args...)
+}
