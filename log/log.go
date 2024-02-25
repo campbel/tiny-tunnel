@@ -6,13 +6,18 @@ import (
 	"github.com/charmbracelet/log"
 )
 
-var logger = log.New(os.Stderr)
+var logger = log.NewWithOptions(os.Stderr, log.Options{
+	ReportTimestamp: true,
+	TimeFormat:      "15:04:05",
+	Level:           log.InfoLevel,
+	ReportCaller:    false,
+	Formatter:       log.TextFormatter,
+})
 
 func init() {
-	logger.SetTimeFormat("15:04:05")
 	if os.Getenv("DEBUG") != "" {
+		logger.SetReportCaller(true)
 		logger.SetLevel(log.DebugLevel)
-		logger.SetFormatter(log.TextFormatter)
 	}
 }
 
