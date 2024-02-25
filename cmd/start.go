@@ -45,7 +45,7 @@ func init() {
 	startCmd.Flags().StringVarP(&target, "target", "t", "", "Target to forward requests to")
 	startCmd.Flags().StringVarP(&name, "name", "n", "", "Name of the client")
 	startCmd.Flags().StringVarP(&serverHost, "server-host", "s", "localhost", "Host of the server")
-	startCmd.Flags().StringVarP(&serverPort, "server-port", "p", "8000", "Port of the server")
+	startCmd.Flags().StringVarP(&serverPort, "server-port", "p", "8080", "Port of the server")
 	startCmd.Flags().BoolVarP(&insecure, "insecure", "i", true, "Use insecure connection")
 	startCmd.Flags().StringSliceVarP(&allowedIPs, "allowed-ips", "a", []string{"0.0.0.0/0", "::/0"}, "Allowed IPs")
 	startCmd.Flags().IntVarP(&reconnectAttempts, "reconnect-attempts", "r", 5, "Reconnect attempts")
