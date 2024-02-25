@@ -1,7 +1,5 @@
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
-github.com/campbel/yoshi v0.0.0-20230128233027-fa55dad4a742 h1:Ywk8u5KIldi/2d/EiE4JX/yxL0J2iXpb8qFXylPow08=
-github.com/campbel/yoshi v0.0.0-20230128233027-fa55dad4a742/go.mod h1:BKQrWtL4D0t0BDj5ni4jSrVoDgdnoCRY4eFWFrQPbbw=
 github.com/charmbracelet/lipgloss v0.7.1 h1:17WMwi7N1b1rVWOjMT+rCh7sQkvDU75B2hbZpc5Kc1E=
 github.com/charmbracelet/lipgloss v0.7.1/go.mod h1:yG0k3giv8Qj8edTCbbg6AlQ5e8KNWpFujkNawKNhE2c=
 github.com/charmbracelet/log v0.2.1 h1:1z7jpkk4yKyjwlmKmKMM5qnEDSpV32E7XtWhuv0mTZE=
