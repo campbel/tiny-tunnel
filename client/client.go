@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	tthttp "github.com/campbel/tiny-tunnel/http"
@@ -12,57 +11,64 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-func Connect(options ConnectOptions) error {
+func ConnectAndHandle(options ConnectOptions) error {
 	if err := options.Valid(); err != nil {
 		return err
 	}
-
 	log.Info("starting client", "options", options)
-	go func() {
-		attempts := 0
-		for {
-			time.Sleep(time.Duration(attempts) * time.Second)
-			attempts++
-			config, err := websocket.NewConfig(options.URL(), options.Origin())
-			util.Must(err)
-			for k, v := range options.ServerHeaders {
-				config.Header.Add(k, v)
+
+	err := Connect(
+		options.URL(), options.Origin(), options.ServerHeaders,
+		func(ws *websocket.Conn, request types.Request) {
+			for k, v := range options.TargetHeaders {
+				request.Headers.Add(k, v)
 			}
-			ws, err := websocket.DialConfig(config)
-			if err != nil {
-				if attempts > options.ReconnectAttempts {
-					log.Info("failed to connect to server, exiting", "error", err.Error())
-					os.Exit(1)
-				}
-				log.Info("failed to connect to server", "error", err.Error())
-				continue
+			response := tthttp.Do(options.Target, request)
+			log.Info("finished",
+				"elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds()),
+				"req_method", request.Method, "req_path", request.Path, "req_headers", request.Headers,
+				"res_status", response.Status, "res_error", response.Error, "res_headers", response.Headers,
+			)
+			if err := websocket.Message.Send(ws, response.JSON()); err != nil {
+				log.Info("failed to send response to server", "error", err.Error())
 			}
-			attempts = 0
-			log.Info("connected to server")
-			for {
-				buffer := make([]byte, 1024)
-				if err := websocket.Message.Receive(ws, &buffer); err != nil {
-					break
-				}
-				request := types.LoadRequest(buffer)
-				for k, v := range options.TargetHeaders {
-					request.Headers.Add(k, v)
-				}
-				go func() {
-					response := tthttp.Do(options.Target, request)
-					log.Info("finished",
-						"elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds()),
-						"req_method", request.Method, "req_path", request.Path, "req_headers", request.Headers,
-						"res_status", response.Status, "res_error", response.Error, "res_headers", response.Headers,
-					)
-					if err := websocket.Message.Send(ws, response.JSON()); err != nil {
-						log.Info("failed to send response to server", "error", err.Error())
-					}
-				}()
-			}
-			log.Info("disconnected from server, reconnecting...")
-		}
-	}()
+		})
+	if err != nil {
+		return err
+	}
 	util.WaitSigInt()
+	return nil
+}
+
+func Connect(url, origin string, serverHeaders map[string]string, handler func(*websocket.Conn, types.Request)) error {
+
+	// Establish a ws connection to the server
+	config, err := websocket.NewConfig(url, origin)
+	if err != nil {
+		return err
+	}
+	for k, v := range serverHeaders {
+		config.Header.Add(k, v)
+	}
+	ws, err := websocket.DialConfig(config)
+	if err != nil {
+		return err
+	}
+
+	log.Info("connected to server")
+
+	// Read requests from the server
+	go func() {
+		for {
+			buffer := make([]byte, 1024)
+			if err := websocket.Message.Receive(ws, &buffer); err != nil {
+				break
+			}
+			request := types.LoadRequest(buffer)
+			go handler(ws, request)
+		}
+		log.Info("disconnected from server")
+	}()
+
 	return nil
 }
