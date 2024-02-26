@@ -21,7 +21,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: "Build Inventory Image"
-        run: |
-          docker build --tag ghcr.io/campbel/tiny-tunnel:latest .
-          docker push ghcr.io/campbel/tiny-tunnel:latest
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: ghcr.io/campbel/tiny-tunnel:latest
