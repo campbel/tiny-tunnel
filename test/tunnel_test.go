@@ -28,7 +28,7 @@ func TestBasicTunnelSetup(t *testing.T) {
 	assert.Equal(http.StatusOK, resp.StatusCode)
 
 	connectURL := "ws://" + server.Listener.Addr().String() + "/register?name=foo"
-	client.Connect(connectURL, "http://localhost", nil, func(ws *websocket.Conn, request types.Request) {
+	_, err = client.Connect(connectURL, "http://localhost", nil, func(ws *websocket.Conn, request types.Request) {
 		response := types.Response{
 			ID:     request.ID,
 			Status: 200,
@@ -38,6 +38,7 @@ func TestBasicTunnelSetup(t *testing.T) {
 			log.Info("failed to send response to server", "error", err.Error())
 		}
 	})
+	assert.Nil(err)
 
 	// Make a request to the server
 	request, err := http.NewRequest("GET", server.URL+"/foo", nil)

@@ -20,12 +20,11 @@ var serveCmd = &cobra.Command{
 	Short: "",
 	Long:  ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		server.Serve(cmd.Context(), server.ServeOptions{
+		return server.Serve(cmd.Context(), server.ServeOptions{
 			Port:        port,
 			Hostname:    hostname,
 			LetsEncrypt: letsEncrypt,
 		})
-		return nil
 	},
 }
 

@@ -138,7 +138,7 @@ func createWebSocketHandler(name string, c chan (types.Request)) http.Handler {
 	})
 }
 
-func Serve(ctx context.Context, options ServeOptions) {
+func Serve(ctx context.Context, options ServeOptions) error {
 	log.Info("starting server", "options", options)
 
 	router := NewHandler(options.Hostname)
@@ -157,16 +157,20 @@ func Serve(ctx context.Context, options ServeOptions) {
 		}
 		server.TLSConfig = m.TLSConfig()
 		go func() {
-			util.Must(server.ListenAndServeTLS("", ""))
+			if err := server.ListenAndServeTLS("", ""); err != nil {
+				log.Error("error starting server", "err", err)
+			}
 		}()
 	} else {
 		go func() {
-			util.Must(server.ListenAndServe())
+			if err := server.ListenAndServe(); err != nil {
+				log.Error("error starting server", "err", err)
+			}
 		}()
 	}
 
 	<-ctx.Done()
 	log.Info("shutting down server")
 	shutdownCtx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	server.Shutdown(shutdownCtx)
+	return server.Shutdown(shutdownCtx)
 }
