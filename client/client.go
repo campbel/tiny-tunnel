@@ -1,9 +1,8 @@
 package client
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"time"
 
 	tthttp "github.com/campbel/tiny-tunnel/http"
@@ -12,7 +11,7 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-func ConnectAndHandle(options ConnectOptions) error {
+func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
 	if err := options.Valid(); err != nil {
 		return err
 	}
@@ -38,12 +37,8 @@ func ConnectAndHandle(options ConnectOptions) error {
 		return err
 	}
 
-	// Wait for cancel or close
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-
 	select {
-	case <-c:
+	case <-ctx.Done():
 		log.Info("connection closed by user")
 	case <-closed:
 		log.Info("connection closed by remote")

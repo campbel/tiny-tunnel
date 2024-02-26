@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -137,7 +138,7 @@ func createWebSocketHandler(name string, c chan (types.Request)) http.Handler {
 	})
 }
 
-func Serve(options ServeOptions) {
+func Serve(ctx context.Context, options ServeOptions) {
 	log.Info("starting server", "options", options)
 
 	router := NewHandler(options.Hostname)
@@ -164,5 +165,8 @@ func Serve(options ServeOptions) {
 		}()
 	}
 
-	util.WaitSigInt()
+	<-ctx.Done()
+	log.Info("shutting down server")
+	shutdownCtx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	server.Shutdown(shutdownCtx)
 }
