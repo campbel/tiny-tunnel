@@ -2,12 +2,13 @@ package client
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
 	"time"
 
 	tthttp "github.com/campbel/tiny-tunnel/http"
 	"github.com/campbel/tiny-tunnel/log"
 	"github.com/campbel/tiny-tunnel/types"
-	"github.com/campbel/tiny-tunnel/util"
 	"golang.org/x/net/websocket"
 )
 
@@ -17,7 +18,7 @@ func ConnectAndHandle(options ConnectOptions) error {
 	}
 	log.Info("starting client", "options", options)
 
-	err := Connect(
+	closed, err := Connect(
 		options.URL(), options.Origin(), options.ServerHeaders,
 		func(ws *websocket.Conn, request types.Request) {
 			for k, v := range options.TargetHeaders {
@@ -36,29 +37,43 @@ func ConnectAndHandle(options ConnectOptions) error {
 	if err != nil {
 		return err
 	}
-	util.WaitSigInt()
+
+	// Wait for cancel or close
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+
+	select {
+	case <-c:
+		log.Info("connection closed by user")
+	case <-closed:
+		log.Info("connection closed by remote")
+	}
+
 	return nil
 }
 
-func Connect(url, origin string, serverHeaders map[string]string, handler func(*websocket.Conn, types.Request)) error {
+func Connect(url, origin string, serverHeaders map[string]string, handler func(*websocket.Conn, types.Request)) (chan bool, error) {
 
 	// Establish a ws connection to the server
 	config, err := websocket.NewConfig(url, origin)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for k, v := range serverHeaders {
 		config.Header.Add(k, v)
 	}
 	ws, err := websocket.DialConfig(config)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	log.Info("connected to server")
 
+	// Close channel when the function returns
+	closed := make(chan bool)
+
 	// Read requests from the server
-	go func() {
+	go func(c chan bool) {
 		for {
 			buffer := make([]byte, 1024)
 			if err := websocket.Message.Receive(ws, &buffer); err != nil {
@@ -68,7 +83,8 @@ func Connect(url, origin string, serverHeaders map[string]string, handler func(*
 			go handler(ws, request)
 		}
 		log.Info("disconnected from server")
-	}()
+		c <- true
+	}(closed)
 
-	return nil
+	return closed, nil
 }
