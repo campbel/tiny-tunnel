@@ -6,9 +6,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o /go/bin/tiny-tunnel
+RUN go build -o /app/bin/tiny-tunnel
 
 FROM alpine:3.19
 
-COPY --from=builder /go/bin/tiny-tunnel /usr/local/bin/tiny-tunnel
+COPY --from=builder /app/bin/tiny-tunnel /usr/local/bin/tiny-tunnel
 ENTRYPOINT [ "/usr/local/bin/tiny-tunnel" ]
