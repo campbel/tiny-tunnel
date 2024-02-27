@@ -19,7 +19,7 @@ func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
 
 	closed, err := Connect(
 		options.URL(), options.Origin(), options.ServerHeaders,
-		func(ws *websocket.Conn, request types.Request) {
+		func(request types.Request) types.Response {
 			for k, v := range options.TargetHeaders {
 				request.Headers.Add(k, v)
 			}
@@ -29,9 +29,7 @@ func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
 				"req_method", request.Method, "req_path", request.Path, "req_headers", request.Headers,
 				"res_status", response.Status, "res_error", response.Error, "res_headers", response.Headers,
 			)
-			if err := websocket.Message.Send(ws, response.JSON()); err != nil {
-				log.Info("failed to send response to server", "error", err.Error())
-			}
+			return response
 		})
 	if err != nil {
 		return err
@@ -47,7 +45,7 @@ func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
 	return nil
 }
 
-func Connect(url, origin string, serverHeaders map[string]string, handler func(*websocket.Conn, types.Request)) (chan bool, error) {
+func Connect(url, origin string, serverHeaders map[string]string, handler func(types.Request) types.Response) (chan bool, error) {
 
 	// Establish a ws connection to the server
 	config, err := websocket.NewConfig(url, origin)
@@ -75,7 +73,11 @@ func Connect(url, origin string, serverHeaders map[string]string, handler func(*
 				break
 			}
 			request := types.LoadRequest(buffer)
-			go handler(ws, request)
+			response := handler(request)
+			response.ID = request.ID
+			if err := websocket.Message.Send(ws, response.JSON()); err != nil {
+				log.Info("failed to send response to server", "error", err.Error())
+			}
 		}
 		log.Info("disconnected from server")
 		c <- true
