@@ -22,7 +22,7 @@ var echoCmd = &cobra.Command{
 	Use:   "echo",
 	Short: "Run an http server that echos the request back to the client.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log.Info("starting echo server", "port", port)
+		log.Info("starting echo server", "port", echoPort)
 		return http.ListenAndServe(":"+echoPort, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			log.Info("handling request", "method", r.Method, "path", r.URL.Path)
 			body, _ := io.ReadAll(r.Body)
