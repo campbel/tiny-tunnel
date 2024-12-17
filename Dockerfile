@@ -11,4 +11,8 @@ RUN go build -o /app/bin/tiny-tunnel
 FROM alpine:3.19
 
 COPY --from=builder /app/bin/tiny-tunnel /usr/local/bin/tiny-tunnel
+
+EXPOSE 80
+EXPOSE 443
+
 ENTRYPOINT [ "/usr/local/bin/tiny-tunnel" ]
