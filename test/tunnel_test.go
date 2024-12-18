@@ -42,6 +42,6 @@ func setupClientServer(handler func(types.Request) types.Response) (*httptest.Se
 	tunnelServerHandler := server.NewHandler("localhost")
 	server := httptest.NewServer(tunnelServerHandler)
 	connectURL := "ws://" + server.Listener.Addr().String() + "/register?name=foo"
-	_, err := client.Connect(connectURL, "http://localhost", nil, handler)
+	_, err := client.ConnectRaw(connectURL, "http://localhost", nil, handler)
 	return server, err
 }

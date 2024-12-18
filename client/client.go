@@ -17,20 +17,7 @@ func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
 	}
 	log.Info("starting client", "options", options)
 
-	closed, err := Connect(
-		options.URL(), options.Origin(), options.ServerHeaders,
-		func(request types.Request) types.Response {
-			for k, v := range options.TargetHeaders {
-				request.Headers.Add(k, v)
-			}
-			response := tthttp.Do(options.Target, request)
-			log.Info("finished",
-				"elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds()),
-				"req_method", request.Method, "req_path", request.Path, "req_headers", request.Headers,
-				"res_status", response.Status, "res_error", response.Error, "res_headers", response.Headers,
-			)
-			return response
-		})
+	closed, err := Connect(ctx, options)
 	if err != nil {
 		return err
 	}
@@ -45,7 +32,24 @@ func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
 	return nil
 }
 
-func Connect(url, origin string, serverHeaders map[string]string, handler func(types.Request) types.Response) (chan bool, error) {
+func Connect(ctx context.Context, options ConnectOptions) (chan bool, error) {
+	return ConnectRaw(
+		options.URL(), options.Origin(), options.ServerHeaders,
+		func(request types.Request) types.Response {
+			for k, v := range options.TargetHeaders {
+				request.Headers.Add(k, v)
+			}
+			response := tthttp.Do(options.Target, request)
+			log.Info("finished",
+				"elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds()),
+				"req_method", request.Method, "req_path", request.Path, "req_headers", request.Headers,
+				"res_status", response.Status, "res_error", response.Error, "res_headers", response.Headers,
+			)
+			return response
+		})
+}
+
+func ConnectRaw(url, origin string, serverHeaders map[string]string, handler func(types.Request) types.Response) (chan bool, error) {
 
 	// Establish a ws connection to the server
 	config, err := websocket.NewConfig(url, origin)
