@@ -17,7 +17,6 @@ func TestDo(t *testing.T) {
 		Path:    "/",
 		Body:    []byte{},
 		Headers: http.Header{},
-		ID:      "123",
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +26,6 @@ func TestDo(t *testing.T) {
 
 	response := Do(server.URL, req)
 
-	assert.Equal("123", response.ID)
 	assert.Equal(http.StatusOK, response.Status)
 	assert.Equal("Hello, World!", string(response.Body))
 }

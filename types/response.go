@@ -8,7 +8,6 @@ import (
 )
 
 type Response struct {
-	ID      string      `json:"id,omitempty"`
 	Status  int         `json:"status,omitempty"`
 	Headers http.Header `json:"headers,omitempty"`
 	Body    []byte      `json:"body,omitempty"`

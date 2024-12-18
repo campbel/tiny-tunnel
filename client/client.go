@@ -76,11 +76,18 @@ func ConnectRaw(url, origin string, serverHeaders map[string]string, handler fun
 			if err := websocket.Message.Receive(ws, &buffer); err != nil {
 				break
 			}
-			request := types.LoadRequest(buffer)
-			response := handler(request)
-			response.ID = request.ID
-			if err := websocket.Message.Send(ws, response.JSON()); err != nil {
-				log.Info("failed to send response to server", "error", err.Error())
+			message := types.LoadMessage(buffer)
+			switch message.Kind {
+			case types.MessageKindRequest:
+				request := types.LoadRequest(message.Payload)
+				response := handler(request)
+				if err := websocket.Message.Send(ws, types.Message{
+					ID:      message.ID,
+					Kind:    types.MessageKindResponse,
+					Payload: response.JSON(),
+				}.JSON()); err != nil {
+					log.Info("failed to send response to server", "error", err.Error())
+				}
 			}
 		}
 		log.Info("disconnected from server")

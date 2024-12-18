@@ -36,7 +36,7 @@ func NewHandler(hostname string) *Handler {
 			http.Error(w, "name is required", http.StatusBadRequest)
 			return
 		}
-		c := make(chan (types.Request))
+		c := make(chan (types.Message))
 		if !dict.SetNX(name, types.Tunnel{ID: name, C: c, AllowedIPs: r.Header[AllowIPHeader]}) {
 			http.Error(w, "name is already used", http.StatusBadRequest)
 			return
@@ -65,34 +65,64 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "gtfo", http.StatusForbidden)
 			return
 		}
-		responseChan := make(chan (types.Response))
-		tunnel.C <- types.Request{
-			Method:       r.Method,
-			Path:         r.URL.Path + "?" + r.URL.Query().Encode(),
-			Headers:      r.Header,
-			Body:         util.MustRead(r.Body),
-			CreatedAt:    time.Now(),
+		// Determine if this is a websocket request
+		if r.Header.Get("Upgrade") == "websocket" {
+			websocket.Handler(func(ws *websocket.Conn) {
+				// Read messages
+				go func() {
+					defer ws.Close()
+					for {
+						buffer := make([]byte, 1024)
+						n, err := ws.Read(buffer)
+						if err != nil {
+							return
+						}
+						buffer = buffer[:n]
+					}
+				}()
+
+				// Send messages
+			}).ServeHTTP(w, r)
+			return
+		}
+
+		// Plain HTTP request
+		responseChan := make(chan (types.Message))
+		tunnel.C <- types.Message{
+			Kind: types.MessageKindRequest,
+			Payload: types.Request{
+				Method:    r.Method,
+				Path:      r.URL.Path + "?" + r.URL.Query().Encode(),
+				Headers:   r.Header,
+				Body:      util.MustRead(r.Body),
+				CreatedAt: time.Now(),
+			}.JSON(),
 			ResponseChan: responseChan,
 		}
-		resp := <-responseChan
-		if resp.Error != "" {
+		responseMessage := <-responseChan
+		if responseMessage.Kind != types.MessageKindResponse {
 			http.Error(w, "there was an error processing your request", http.StatusInternalServerError)
 			return
 		}
-		for k, v := range resp.Headers {
+		response := types.LoadResponse(responseMessage.Payload)
+		if response.Error != "" {
+			http.Error(w, "there was an error processing your request", http.StatusInternalServerError)
+			return
+		}
+		for k, v := range response.Headers {
 			for _, v := range v {
 				w.Header().Add(k, v)
 			}
 		}
-		w.WriteHeader(resp.Status)
-		w.Write(resp.Body)
+		w.WriteHeader(response.Status)
+		w.Write(response.Body)
 		return
 	}
 	http.Error(w, "the specified service is unavailable", http.StatusServiceUnavailable)
 }
 
-func createWebSocketHandler(name string, c chan (types.Request)) http.Handler {
-	responseDict := sync.NewMap[string, chan (types.Response)]()
+func createWebSocketHandler(name string, c chan (types.Message)) http.Handler {
+	responseDict := sync.NewMap[string, chan (types.Message)]()
 	return websocket.Handler(func(ws *websocket.Conn) {
 		done := make(chan bool)
 		// Read responses
@@ -107,12 +137,15 @@ func createWebSocketHandler(name string, c chan (types.Request)) http.Handler {
 					log.Info("error reading response", "err", err.Error(), "name", name)
 					return
 				}
-				response := types.LoadResponse(buffer)
-				if responseChan, ok := responseDict.Get(response.ID); !ok {
-					log.Info("response undeliverable", "id", response.ID, "name", name)
-				} else {
-					responseChan <- response
-					responseDict.Delete(response.ID)
+				message := types.LoadMessage(buffer)
+				switch message.Kind {
+				case types.MessageKindResponse:
+					if responseChan, ok := responseDict.Get(message.ID); !ok {
+						log.Info("response undeliverable", "id", message.ID, "name", name)
+					} else {
+						responseChan <- message
+						responseDict.Delete(message.ID)
+					}
 				}
 			}
 		}()
@@ -124,8 +157,10 @@ func createWebSocketHandler(name string, c chan (types.Request)) http.Handler {
 				break LOOP
 			case msg := <-c:
 				id := util.RandString(24)
-				if !responseDict.SetNX(id, msg.ResponseChan) {
-					break LOOP
+				if msg.Kind == types.MessageKindRequest {
+					if !responseDict.SetNX(id, msg.ResponseChan) {
+						break LOOP
+					}
 				}
 				msg.ID = id
 				if err := websocket.Message.Send(ws, msg.JSON()); err != nil {

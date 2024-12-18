@@ -9,13 +9,11 @@ import (
 )
 
 type Request struct {
-	ID           string          `json:"id,omitempty"`
-	Method       string          `json:"method,omitempty"`
-	Path         string          `json:"path,omitempty"`
-	Headers      http.Header     `json:"headers,omitempty"`
-	Body         []byte          `json:"body,omitempty"`
-	CreatedAt    time.Time       `json:"created_at,omitempty"`
-	ResponseChan chan (Response) `json:"-"`
+	Method    string      `json:"method,omitempty"`
+	Path      string      `json:"path,omitempty"`
+	Headers   http.Header `json:"headers,omitempty"`
+	Body      []byte      `json:"body,omitempty"`
+	CreatedAt time.Time   `json:"created_at,omitempty"`
 }
 
 func (r Request) JSON() []byte {
