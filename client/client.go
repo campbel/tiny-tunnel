@@ -9,7 +9,6 @@ import (
 	"github.com/campbel/tiny-tunnel/log"
 	"github.com/campbel/tiny-tunnel/types"
 	"github.com/campbel/tiny-tunnel/util"
-	"golang.org/x/net/websocket"
 
 	"github.com/campbel/tiny-tunnel/sync"
 
@@ -44,13 +43,7 @@ func Connect(ctx context.Context, options ConnectOptions) (chan bool, error) {
 			for k, v := range options.TargetHeaders {
 				request.Headers.Add(k, v)
 			}
-			response := tthttp.Do(options.Target, request)
-			// log.Info("finished",
-			// 	"elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds()),
-			// 	"req_method", request.Method, "req_path", request.Path, "req_headers", request.Headers,
-			// 	"res_status", response.Status, "res_error", response.Error, "res_headers", response.Headers,
-			// )
-			return response
+			return tthttp.Do(options.Target, request)
 		}, options)
 }
 
@@ -60,14 +53,13 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 	wsConnections := sync.NewMap[string, *gws.Conn]()
 
 	// Establish a ws connection to the server
-	config, err := websocket.NewConfig(rawURL, origin)
-	if err != nil {
-		return nil, err
+	dialer := gws.Dialer{}
+	headers := http.Header{}
+	headers.Add("Origin", origin)
+	for k, v := range options.ServerHeaders {
+		headers.Add(k, v)
 	}
-	for k, v := range serverHeaders {
-		config.Header.Add(k, v)
-	}
-	tunnelWSConn, err := websocket.DialConfig(config)
+	conn, _, err := dialer.Dial(rawURL, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -80,11 +72,12 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 	// Read requests from the server
 	go func(c chan bool) {
 		for {
-			var buffer []byte
-			if err := websocket.Message.Receive(tunnelWSConn, &buffer); err != nil {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
 				break
 			}
-			message := types.LoadMessage(buffer)
+
+			message := types.LoadMessage(data)
 			switch message.Kind {
 			case types.MessageKindWebsocketCreateRequest:
 				sessionID := util.RandString(20)
@@ -137,14 +130,14 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 							wsMsg = types.NewStringWebsocketMessage(sessionID, string(data))
 						}
 
-						websocket.Message.Send(tunnelWSConn, types.NewMessage(
+						conn.WriteMessage(gws.BinaryMessage, types.NewMessage(
 							types.MessageKindWebsocketMessage,
 							wsMsg,
 						).JSON())
 					}
 				}(sessionID)
 
-				if err := websocket.Message.Send(tunnelWSConn, types.NewResponseMessage(
+				if err := conn.WriteMessage(gws.BinaryMessage, types.NewResponseMessage(
 					message.ID,
 					types.MessageKindWebsocketCreateResponse,
 					types.WebsocketCreateResponse{
@@ -153,6 +146,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 				).JSON()); err != nil {
 					log.Info("failed to send response to server", "error", err.Error())
 				}
+
 			case types.MessageKindWebsocketMessage:
 				message := types.LoadWebsocketMessage(message.Payload)
 				wsConn, ok := wsConnections.Get(message.SessionID)
@@ -175,7 +169,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 			case types.MessageKindHttpRequest:
 				request := types.LoadRequest(message.Payload)
 				response := handler(request)
-				if err := websocket.Message.Send(tunnelWSConn, types.NewResponseMessage(
+				if err := conn.WriteMessage(gws.BinaryMessage, types.NewResponseMessage(
 					message.ID,
 					types.MessageKindHttpResponse,
 					response,

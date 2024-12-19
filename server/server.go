@@ -11,7 +11,6 @@ import (
 	"github.com/campbel/tiny-tunnel/types"
 	"github.com/campbel/tiny-tunnel/util"
 	"golang.org/x/crypto/acme/autocert"
-	"golang.org/x/net/websocket"
 
 	gws "github.com/gorilla/websocket"
 )
@@ -44,7 +43,11 @@ func NewHandler(hostname string) *Handler {
 			return
 		}
 		log.Info("registered tunnel", "name", name)
-		createWebSocketHandler(tunnel).ServeHTTP(w, r)
+
+		if err := tunnel.Run(w, r); err != nil {
+			log.Error("error starting tunnel", "err", err)
+		}
+
 		dict.Delete(name)
 		log.Info("unregistered tunnel", "name", name)
 	})
@@ -64,7 +67,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if tunnel, ok := h.tunnels.Get(name); ok {
 		if !util.AllowedIP(r, tunnel.AllowedIPs) {
-			http.Error(w, "gtfo", http.StatusForbidden)
+			http.Error(w, "", http.StatusForbidden)
 			return
 		}
 		// Determine if this is a websocket request
@@ -169,76 +172,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Error(w, "the specified service is unavailable", http.StatusServiceUnavailable)
-}
-
-func createWebSocketHandler(tunnel *Tunnel) http.Handler {
-	return websocket.Handler(func(ws *websocket.Conn) {
-		done := make(chan bool)
-		// Read responses
-		go func() {
-			defer func() {
-				done <- true
-				log.Info("closing reads", "name", tunnel.ID)
-			}()
-			for {
-				var buffer []byte
-				if err := websocket.Message.Receive(ws, &buffer); err != nil {
-					log.Info("error receiving message", "err", err.Error(), "name", tunnel.ID)
-					return
-				}
-				message := types.LoadMessage(buffer)
-
-				// Handle messages with expected responses
-				if message.ResponseTo != "" {
-					if responseChan, ok := tunnel.Responses.Get(message.ResponseTo); !ok {
-						log.Error("response undeliverable", "id", message.ResponseTo, "name", tunnel.ID)
-					} else {
-						responseChan <- message
-						tunnel.Responses.Delete(message.ResponseTo)
-					}
-					continue
-				}
-
-				// Handle websocket messages
-				if message.Kind == types.MessageKindWebsocketMessage {
-					wsMessage := types.LoadWebsocketMessage(message.Payload)
-					wsConn, ok := tunnel.WSSessions.Get(wsMessage.SessionID)
-					if !ok {
-						log.Info("failed to get websocket connection", "session_id", wsMessage.SessionID)
-						continue
-					}
-
-					if wsMessage.IsBinary() {
-						if err := wsConn.WriteMessage(gws.BinaryMessage, wsMessage.BinaryData); err != nil {
-							log.Info("failed to send message to websocket", "error", err.Error())
-							continue
-						}
-					} else {
-						if err := wsConn.WriteMessage(gws.TextMessage, []byte(wsMessage.StringData)); err != nil {
-							log.Info("failed to send message to websocket", "error", err.Error())
-							continue
-						}
-					}
-					log.Info("websocket message sent successfully", "session_id", wsMessage.SessionID, "data", string(wsMessage.BinaryData))
-				}
-			}
-		}()
-
-		// Write messages
-	LOOP:
-		for {
-			select {
-			case <-done:
-				break LOOP
-			case msg := <-tunnel.sendChannel:
-				if err := websocket.Message.Send(ws, msg.JSON()); err != nil {
-					log.Info("error writing request", "err", err, "name", tunnel.ID)
-					break LOOP
-				}
-			}
-		}
-		log.Info("closing writes", "name", tunnel.ID)
-	})
 }
 
 func Serve(ctx context.Context, options ServeOptions) error {

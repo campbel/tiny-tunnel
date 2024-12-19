@@ -10,9 +10,8 @@ import (
 	"testing"
 
 	"github.com/campbel/tiny-tunnel/client"
-	gws "github.com/gorilla/websocket"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/websocket"
 )
 
 func TestServer(t *testing.T) {
@@ -97,55 +96,60 @@ func TestServerWebSocket(t *testing.T) {
 
 	// Make a websocket request to the app-server (verify that it works without tt)
 	appHost, appPort := getServerAndPortFromURL(t, appServer.URL)
-	ws, err := websocket.Dial(fmt.Sprintf("ws://%s:%s/ws/%s", appHost, appPort, tunnelName), "", fmt.Sprintf("http://%s.%s", tunnelName, serverDomain))
+
+	dialer := websocket.Dialer{}
+	headers := http.Header{}
+	headers.Add("Origin", fmt.Sprintf("http://%s.%s", tunnelName, serverDomain))
+	conn, _, err := dialer.Dial(fmt.Sprintf("ws://%s:%s", appHost, appPort), headers)
 	if !assert.NoError(err) {
 		return
 	}
-	defer ws.Close()
-	if err := websocket.Message.Send(ws, "Hello, World!"); !assert.NoError(err) {
+	defer conn.Close()
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("Hello, World!")); !assert.NoError(err) {
 		return
 	}
-	var buffer string
-	if err := websocket.Message.Receive(ws, &buffer); !assert.NoError(err) {
+	wt, buffer, err := conn.ReadMessage()
+	if !assert.NoError(err) {
 		return
 	}
+	assert.Equal(websocket.TextMessage, wt)
 	assert.Equal("Hello, World!", string(buffer))
 
 	// Make a websocket request to the tt-server
-	config, err := websocket.NewConfig(fmt.Sprintf("ws://%s:%s", serverHost, serverPort), fmt.Sprintf("http://%s.%s", tunnelName, serverDomain))
+	dialer = websocket.Dialer{}
+	headers = http.Header{}
+	headers.Add("Origin", fmt.Sprintf("http://%s.%s", tunnelName, serverDomain))
+	headers.Add("X-TT-Host", fmt.Sprintf("%s.%s", tunnelName, serverDomain))
+	conn, _, err = dialer.Dial(fmt.Sprintf("ws://%s:%s", serverHost, serverPort), headers)
 	if !assert.NoError(err) {
 		return
 	}
-	config.Header = http.Header{
-		"X-TT-Host": []string{fmt.Sprintf("%s.%s", tunnelName, serverDomain)},
-	}
-	ws, err = websocket.DialConfig(config)
-	if !assert.NoError(err) {
-		return
-	}
-	defer ws.Close()
+	defer conn.Close()
+
 	// strings
 	for i := range 5 {
-		if err := websocket.Message.Send(ws, fmt.Sprintf("Hello, World! %d", i)); !assert.NoError(err) {
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Hello, World! %d", i))); !assert.NoError(err) {
 			return
 		}
-		var buffer string
-		if err := websocket.Message.Receive(ws, &buffer); !assert.NoError(err) {
+		wt, buffer, err := conn.ReadMessage()
+		if !assert.NoError(err) {
 			return
 		}
-		assert.Equal(fmt.Sprintf("Hello, World! %d", i), buffer)
+		assert.Equal(websocket.TextMessage, wt)
+		assert.Equal(fmt.Sprintf("Hello, World! %d", i), string(buffer))
 	}
 
 	// binary
 	var data = []byte{0xFF, 0xFE, 0xFD}
 	for range 5 {
-		if err := websocket.Message.Send(ws, data); !assert.NoError(err) {
+		if err := conn.WriteMessage(websocket.BinaryMessage, data); !assert.NoError(err) {
 			return
 		}
-		var buffer []byte
-		if err := websocket.Message.Receive(ws, &buffer); !assert.NoError(err) {
+		wt, buffer, err := conn.ReadMessage()
+		if !assert.NoError(err) {
 			return
 		}
+		assert.Equal(websocket.BinaryMessage, wt)
 		assert.Equal(data, buffer)
 	}
 }
@@ -162,7 +166,7 @@ func getServerAndPortFromURL(t *testing.T, rawURL string) (string, string) {
 func handleWebsocketConn(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	t.Helper()
 
-	upgrader := gws.Upgrader{
+	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
@@ -181,12 +185,12 @@ func handleWebsocketConn(t *testing.T, w http.ResponseWriter, r *http.Request) {
 		}
 
 		switch mt {
-		case gws.TextMessage:
-			if err := conn.WriteMessage(gws.TextMessage, data); err != nil {
+		case websocket.TextMessage:
+			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				t.Fatal(err)
 			}
-		case gws.BinaryMessage:
-			if err := conn.WriteMessage(gws.BinaryMessage, data); err != nil {
+		case websocket.BinaryMessage:
+			if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
 				t.Fatal(err)
 			}
 		}
