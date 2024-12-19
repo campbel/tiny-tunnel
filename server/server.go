@@ -12,6 +12,8 @@ import (
 	"github.com/campbel/tiny-tunnel/util"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/net/websocket"
+
+	gws "github.com/gorilla/websocket"
 )
 
 var (
@@ -88,33 +90,48 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			response := types.LoadWebsocketCreateResponse(responseMessage.Payload)
+			sessionID := response.SessionID
 
-			log.Info("websocket create response", "session_id", response.SessionID, "tunnel", tunnel.ID)
-			websocket.Handler(func(ws *websocket.Conn) {
-				log.Info("starting ws handler", "session_id", response.SessionID, "tunnel", tunnel.ID)
-				if !tunnel.WSSessions.SetNX(response.SessionID, ws) {
-					log.Info("failed to set websocket session", "session_id", response.SessionID)
-					return
+			upgrader := gws.Upgrader{
+				CheckOrigin: func(r *http.Request) bool {
+					// TODO: Implement a more secure check
+					return true
+				},
+			}
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+
+			if !tunnel.WSSessions.SetNX(sessionID, conn) {
+				log.Info("failed to set websocket session", "session_id", sessionID)
+				return
+			}
+
+			// Listen for messages
+			for {
+
+				mt, data, err := conn.ReadMessage()
+				if err != nil {
+					log.Info("error reading message", "err", err.Error(), "name", tunnel.ID, "session_id", sessionID)
+					break
 				}
 
-				// Listen for messages
-				log.Info("listening for websocket messages", "session_id", response.SessionID, "tunnel", tunnel.ID)
-				for {
-					var buffer []byte
-					if err := websocket.Message.Receive(ws, &buffer); err != nil {
-						break
-					}
-					log.Info("received websocket message, sending through tunnel", "session_id", response.SessionID, "tunnel", tunnel.ID)
-					tunnel.Send(
-						types.MessageKindWebsocketMessage,
-						types.WebsocketMessage{
-							SessionID: response.SessionID,
-							Data:      buffer,
-						}.JSON(),
-						nil,
-					)
+				var wsMsg types.WebsocketMessage
+				switch mt {
+				case gws.BinaryMessage:
+					wsMsg = types.NewBinaryWebsocketMessage(sessionID, data)
+				case gws.TextMessage:
+					wsMsg = types.NewStringWebsocketMessage(sessionID, string(data))
 				}
-			}).ServeHTTP(w, r)
+
+				tunnel.Send(
+					types.MessageKindWebsocketMessage,
+					wsMsg.JSON(),
+					nil,
+				)
+			}
 
 			return
 		}
@@ -190,12 +207,19 @@ func createWebSocketHandler(tunnel *Tunnel) http.Handler {
 						log.Info("failed to get websocket connection", "session_id", wsMessage.SessionID)
 						continue
 					}
-					log.Info("sending websocket message", "session_id", wsMessage.SessionID, "data", string(wsMessage.Data))
-					if err := websocket.Message.Send(wsConn, string(wsMessage.Data)); err != nil {
-						log.Info("failed to send message to websocket", "error", err.Error())
-						continue
+
+					if wsMessage.IsBinary() {
+						if err := wsConn.WriteMessage(gws.BinaryMessage, wsMessage.BinaryData); err != nil {
+							log.Info("failed to send message to websocket", "error", err.Error())
+							continue
+						}
+					} else {
+						if err := wsConn.WriteMessage(gws.TextMessage, []byte(wsMessage.StringData)); err != nil {
+							log.Info("failed to send message to websocket", "error", err.Error())
+							continue
+						}
 					}
-					log.Info("websocket message sent successfully", "session_id", wsMessage.SessionID, "data", string(wsMessage.Data))
+					log.Info("websocket message sent successfully", "session_id", wsMessage.SessionID, "data", string(wsMessage.BinaryData))
 				}
 			}
 		}()

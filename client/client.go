@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 
 	tthttp "github.com/campbel/tiny-tunnel/http"
@@ -11,6 +12,8 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/campbel/tiny-tunnel/sync"
+
+	gws "github.com/gorilla/websocket"
 )
 
 func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
@@ -54,7 +57,7 @@ func Connect(ctx context.Context, options ConnectOptions) (chan bool, error) {
 func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler func(types.HTTPRequest) types.HTTPResponse, options ConnectOptions) (chan bool, error) {
 
 	// Defined a websocket connection map
-	wsConnections := sync.NewMap[string, *websocket.Conn]()
+	wsConnections := sync.NewMap[string, *gws.Conn]()
 
 	// Establish a ws connection to the server
 	config, err := websocket.NewConfig(rawURL, origin)
@@ -77,7 +80,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 	// Read requests from the server
 	go func(c chan bool) {
 		for {
-			buffer := make([]byte, 1024)
+			var buffer []byte
 			if err := websocket.Message.Receive(tunnelWSConn, &buffer); err != nil {
 				break
 			}
@@ -105,19 +108,14 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 				}
 				url_.Path = request.Path
 
-				config, err := websocket.NewConfig(url_.String(), origin)
-				if err != nil {
-					log.Info("failed to create websocket config", "error", err.Error())
-				}
-				for k, v := range request.Headers {
-					for _, vv := range v {
-						config.Header.Add(k, vv)
-					}
-				}
-				appWSConn, err := websocket.DialConfig(config)
+				dialer := gws.Dialer{}
+				headers := http.Header{}
+				headers.Add("Origin", request.Origin)
+
+				appWSConn, _, err := dialer.Dial(url_.String(), headers)
 				if err != nil {
 					log.Info("failed to dial websocket", "error", err.Error())
-					return
+					panic(err)
 				}
 				if !wsConnections.SetNX(sessionID, appWSConn) {
 					log.Info("failed to set websocket connection")
@@ -126,17 +124,22 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 				// Read messages
 				go func(sessionID string) {
 					for {
-						var buffer []byte
-						if err := websocket.Message.Receive(appWSConn, &buffer); err != nil {
+						mt, data, err := appWSConn.ReadMessage()
+						if err != nil {
+							log.Info("error reading message", "err", err.Error(), "session_id", sessionID)
 							break
 						}
-						log.Info("received websocket message", "session_id", sessionID, "data", string(buffer))
+						var wsMsg types.WebsocketMessage
+						switch mt {
+						case gws.BinaryMessage:
+							wsMsg = types.NewBinaryWebsocketMessage(sessionID, data)
+						case gws.TextMessage:
+							wsMsg = types.NewStringWebsocketMessage(sessionID, string(data))
+						}
+
 						websocket.Message.Send(tunnelWSConn, types.NewMessage(
 							types.MessageKindWebsocketMessage,
-							types.WebsocketMessage{
-								SessionID: sessionID,
-								Data:      buffer,
-							},
+							wsMsg,
 						).JSON())
 					}
 				}(sessionID)
@@ -152,16 +155,22 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 				}
 			case types.MessageKindWebsocketMessage:
 				message := types.LoadWebsocketMessage(message.Payload)
-				log.Info("received websocket message from server, sending to app", "session_id", message.SessionID)
 				wsConn, ok := wsConnections.Get(message.SessionID)
 				if !ok {
 					log.Info("failed to get websocket connection", "session_id", message.SessionID)
 					return
 				}
-				if err := websocket.Message.Send(wsConn, message.Data); err != nil {
-					log.Info("failed to send message to websocket", "error", err.Error())
+				if message.IsBinary() {
+					if err := wsConn.WriteMessage(gws.BinaryMessage, message.BinaryData); err != nil {
+						log.Info("failed to send message to websocket", "error", err.Error())
+						continue
+					}
+				} else {
+					if err := wsConn.WriteMessage(gws.TextMessage, []byte(message.StringData)); err != nil {
+						log.Info("failed to send message to websocket", "error", err.Error())
+						continue
+					}
 				}
-				log.Info("message sent to websocket successfully", "session_id", message.SessionID)
 
 			case types.MessageKindHttpRequest:
 				request := types.LoadRequest(message.Payload)

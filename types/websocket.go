@@ -39,7 +39,30 @@ func LoadWebsocketCreateResponse(data []byte) WebsocketCreateResponse {
 
 type WebsocketMessage struct {
 	SessionID string `json:"session_id,omitempty"`
-	Data      []byte `json:"payload,omitempty"`
+
+	DataType   byte   `json:"is_binary,omitempty"`
+	BinaryData []byte `json:"payload,omitempty"`
+	StringData string `json:"string_payload,omitempty"`
+}
+
+func NewBinaryWebsocketMessage(sessionID string, data []byte) WebsocketMessage {
+	return WebsocketMessage{
+		SessionID:  sessionID,
+		DataType:   1,
+		BinaryData: data,
+	}
+}
+
+func NewStringWebsocketMessage(sessionID, data string) WebsocketMessage {
+	return WebsocketMessage{
+		SessionID:  sessionID,
+		DataType:   0,
+		StringData: data,
+	}
+}
+
+func (m WebsocketMessage) IsBinary() bool {
+	return m.DataType == 1
 }
 
 func (m WebsocketMessage) JSON() []byte {

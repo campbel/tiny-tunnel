@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/campbel/tiny-tunnel/client"
+	gws "github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/websocket"
 )
@@ -75,7 +76,7 @@ func TestServerWebSocket(t *testing.T) {
 	ttServer := httptest.NewServer(NewHandler(serverDomain))
 
 	appServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		createEchoWebsocketHandler(t).ServeHTTP(w, r)
+		handleWebsocketConn(t, w, r)
 	}))
 
 	// Connect as a tt-client to the tt-server
@@ -101,10 +102,10 @@ func TestServerWebSocket(t *testing.T) {
 		return
 	}
 	defer ws.Close()
-	if err := websocket.Message.Send(ws, []byte("Hello, World!")); !assert.NoError(err) {
+	if err := websocket.Message.Send(ws, "Hello, World!"); !assert.NoError(err) {
 		return
 	}
-	var buffer []byte
+	var buffer string
 	if err := websocket.Message.Receive(ws, &buffer); !assert.NoError(err) {
 		return
 	}
@@ -123,15 +124,29 @@ func TestServerWebSocket(t *testing.T) {
 		return
 	}
 	defer ws.Close()
+	// strings
 	for i := range 5 {
-		if err := websocket.Message.Send(ws, []byte(fmt.Sprintf("Hello, World! %d", i))); !assert.NoError(err) {
+		if err := websocket.Message.Send(ws, fmt.Sprintf("Hello, World! %d", i)); !assert.NoError(err) {
+			return
+		}
+		var buffer string
+		if err := websocket.Message.Receive(ws, &buffer); !assert.NoError(err) {
+			return
+		}
+		assert.Equal(fmt.Sprintf("Hello, World! %d", i), buffer)
+	}
+
+	// binary
+	var data = []byte{0xFF, 0xFE, 0xFD}
+	for range 5 {
+		if err := websocket.Message.Send(ws, data); !assert.NoError(err) {
 			return
 		}
 		var buffer []byte
 		if err := websocket.Message.Receive(ws, &buffer); !assert.NoError(err) {
 			return
 		}
-		assert.Equal(fmt.Sprintf("Hello, World! %d", i), string(buffer))
+		assert.Equal(data, buffer)
 	}
 }
 
@@ -144,18 +159,36 @@ func getServerAndPortFromURL(t *testing.T, rawURL string) (string, string) {
 	return url.Hostname(), url.Port()
 }
 
-func createEchoWebsocketHandler(t *testing.T) websocket.Handler {
+func handleWebsocketConn(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	t.Helper()
-	return websocket.Handler(func(ws *websocket.Conn) {
-		defer ws.Close()
-		for {
-			var buffer []byte
-			if err := websocket.Message.Receive(ws, &buffer); !assert.NoError(t, err) {
-				return
+
+	upgrader := gws.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	for {
+		mt, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		switch mt {
+		case gws.TextMessage:
+			if err := conn.WriteMessage(gws.TextMessage, data); err != nil {
+				t.Fatal(err)
 			}
-			if err := websocket.Message.Send(ws, buffer); !assert.NoError(t, err) {
-				return
+		case gws.BinaryMessage:
+			if err := conn.WriteMessage(gws.BinaryMessage, data); err != nil {
+				t.Fatal(err)
 			}
 		}
-	})
+	}
 }
