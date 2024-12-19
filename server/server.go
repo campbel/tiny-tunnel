@@ -68,8 +68,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Determine if this is a websocket request
 		if r.Header.Get("Upgrade") == "websocket" {
 
+			log.Info("requesting websocket create", "tunnel", tunnel.ID)
 			responseChan := make(chan (types.Message))
-			tunnel.Send(
+			if err := tunnel.Send(
 				types.MessageKindWebsocketCreateRequest,
 				types.WebsocketCreateRequest{
 					Path:    r.URL.Path,
@@ -77,14 +78,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					Origin:  r.Header.Get("Origin"),
 				}.JSON(),
 				responseChan,
-			)
+			); err != nil {
+				http.Error(w, "there was an error processing your request", http.StatusInternalServerError)
+				return
+			}
 			responseMessage := <-responseChan
 			if responseMessage.Kind != types.MessageKindWebsocketCreateResponse {
 				http.Error(w, "there was an error processing your request", http.StatusInternalServerError)
 				return
 			}
 			response := types.LoadWebsocketCreateResponse(responseMessage.Payload)
-			log.Info("websocket create response", "session_id", response.SessionID)
+
+			log.Info("websocket create response", "session_id", response.SessionID, "tunnel", tunnel.ID)
 			websocket.Handler(func(ws *websocket.Conn) {
 				if !tunnel.WSSessions.SetNX(response.SessionID, ws) {
 					log.Info("failed to set websocket session", "session_id", response.SessionID)
@@ -96,6 +101,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					if err := websocket.Message.Receive(ws, &buffer); err != nil {
 						break
 					}
+					log.Info("received websocket message", "session_id", response.SessionID, "tunnel", tunnel.ID)
 					tunnel.Send(
 						types.MessageKindWebsocketMessage,
 						types.WebsocketMessage{

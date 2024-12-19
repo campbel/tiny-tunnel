@@ -63,14 +63,16 @@ func WaitSigInt() {
 func RandString(n int) string {
 	b := make([]rune, n)
 	for i := range b {
-		b[i] = randomRune('0', 'z')
+		b[i] = randomRune()
 	}
 	return string(b)
 }
 
-func randomRune(first, last rune) rune {
-	v, _ := rand.Int(rand.Reader, big.NewInt(int64(last-first+1)))
-	return rune(v.Int64()) + first
+var runes = []rune("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+func randomRune() rune {
+	v, _ := rand.Int(rand.Reader, big.NewInt(int64(len(runes))))
+	return runes[v.Int64()]
 }
 
 func AllowedIP(r *http.Request, allowedIPs []string) bool {
