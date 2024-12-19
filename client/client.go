@@ -12,7 +12,7 @@ import (
 
 	"github.com/campbel/tiny-tunnel/sync"
 
-	gws "github.com/gorilla/websocket"
+	"github.com/gorilla/websocket"
 )
 
 func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
@@ -50,19 +50,22 @@ func Connect(ctx context.Context, options ConnectOptions) (chan bool, error) {
 func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler func(types.HTTPRequest) types.HTTPResponse, options ConnectOptions) (chan bool, error) {
 
 	// Defined a websocket connection map
-	wsConnections := sync.NewMap[string, *gws.Conn]()
+	wsConnections := sync.NewMap[string, *sync.WSConn]()
 
 	// Establish a ws connection to the server
-	dialer := gws.Dialer{}
+	dialer := websocket.Dialer{}
 	headers := http.Header{}
 	headers.Add("Origin", origin)
 	for k, v := range options.ServerHeaders {
 		headers.Add(k, v)
 	}
-	conn, _, err := dialer.Dial(rawURL, headers)
+
+	rawConn, _, err := dialer.Dial(rawURL, headers)
 	if err != nil {
 		return nil, err
 	}
+
+	conn := sync.NewWSConn(rawConn)
 
 	log.Info("connected to server")
 
@@ -101,43 +104,45 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 				}
 				url_.Path = request.Path
 
-				dialer := gws.Dialer{}
+				dialer := websocket.Dialer{}
 				headers := http.Header{}
 				headers.Add("Origin", request.Origin)
 
-				appWSConn, _, err := dialer.Dial(url_.String(), headers)
+				rawAppConn, _, err := dialer.Dial(url_.String(), headers)
 				if err != nil {
 					log.Info("failed to dial websocket", "error", err.Error())
 					panic(err)
 				}
-				if !wsConnections.SetNX(sessionID, appWSConn) {
+				appCon := sync.NewWSConn(rawAppConn)
+
+				if !wsConnections.SetNX(sessionID, appCon) {
 					log.Info("failed to set websocket connection")
 					return
 				}
 				// Read messages
 				go func(sessionID string) {
 					for {
-						mt, data, err := appWSConn.ReadMessage()
+						mt, data, err := appCon.ReadMessage()
 						if err != nil {
 							log.Info("error reading message", "err", err.Error(), "session_id", sessionID)
 							break
 						}
 						var wsMsg types.WebsocketMessage
 						switch mt {
-						case gws.BinaryMessage:
+						case websocket.BinaryMessage:
 							wsMsg = types.NewBinaryWebsocketMessage(sessionID, data)
-						case gws.TextMessage:
+						case websocket.TextMessage:
 							wsMsg = types.NewStringWebsocketMessage(sessionID, string(data))
 						}
 
-						conn.WriteMessage(gws.BinaryMessage, types.NewMessage(
+						conn.WriteMessage(websocket.BinaryMessage, types.NewMessage(
 							types.MessageKindWebsocketMessage,
 							wsMsg,
 						).JSON())
 					}
 				}(sessionID)
 
-				if err := conn.WriteMessage(gws.BinaryMessage, types.NewResponseMessage(
+				if err := conn.WriteMessage(websocket.BinaryMessage, types.NewResponseMessage(
 					message.ID,
 					types.MessageKindWebsocketCreateResponse,
 					types.WebsocketCreateResponse{
@@ -155,12 +160,12 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 					return
 				}
 				if message.IsBinary() {
-					if err := wsConn.WriteMessage(gws.BinaryMessage, message.BinaryData); err != nil {
+					if err := wsConn.WriteMessage(websocket.BinaryMessage, message.BinaryData); err != nil {
 						log.Info("failed to send message to websocket", "error", err.Error())
 						continue
 					}
 				} else {
-					if err := wsConn.WriteMessage(gws.TextMessage, []byte(message.StringData)); err != nil {
+					if err := wsConn.WriteMessage(websocket.TextMessage, []byte(message.StringData)); err != nil {
 						log.Info("failed to send message to websocket", "error", err.Error())
 						continue
 					}
@@ -169,7 +174,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 			case types.MessageKindHttpRequest:
 				request := types.LoadRequest(message.Payload)
 				response := handler(request)
-				if err := conn.WriteMessage(gws.BinaryMessage, types.NewResponseMessage(
+				if err := conn.WriteMessage(websocket.BinaryMessage, types.NewResponseMessage(
 					message.ID,
 					types.MessageKindHttpResponse,
 					response,

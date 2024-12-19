@@ -17,7 +17,7 @@ type Tunnel struct {
 	sendChannel chan (types.Message)
 	AllowedIPs  []string
 
-	WSSessions *sync.Map[string, *websocket.Conn]
+	WSSessions *sync.Map[string, *sync.WSConn]
 	Responses  *sync.Map[string, chan (types.Message)]
 }
 
@@ -26,7 +26,7 @@ func NewTunnel(id string, allowedIPs []string) *Tunnel {
 		ID:          id,
 		sendChannel: make(chan (types.Message)),
 		AllowedIPs:  allowedIPs,
-		WSSessions:  sync.NewMap[string, *websocket.Conn](),
+		WSSessions:  sync.NewMap[string, *sync.WSConn](),
 		Responses:   sync.NewMap[string, chan (types.Message)](),
 	}
 }
@@ -53,11 +53,13 @@ func (t *Tunnel) Run(w http.ResponseWriter, r *http.Request) error {
 		},
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	rawConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer rawConn.Close()
+
+	conn := sync.NewWSConn(rawConn)
 
 	// Channel to sync the reader and writer
 	done := make(chan bool)

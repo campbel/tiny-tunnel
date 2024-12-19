@@ -101,11 +101,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					return true
 				},
 			}
-			conn, err := upgrader.Upgrade(w, r, nil)
+			rawConn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
 				return
 			}
-			defer conn.Close()
+			defer rawConn.Close()
+
+			conn := sync.NewWSConn(rawConn)
 
 			if !tunnel.WSSessions.SetNX(sessionID, conn) {
 				log.Info("failed to set websocket session", "session_id", sessionID)
