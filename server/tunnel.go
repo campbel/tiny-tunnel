@@ -37,10 +37,9 @@ func (t *Tunnel) Send(kind string, payload []byte, responseChan chan (types.Mess
 		}
 	}
 	t.sendChannel <- types.Message{
-		ID:           messageID,
-		Kind:         kind,
-		Payload:      payload,
-		ResponseChan: responseChan,
+		ID:      messageID,
+		Kind:    kind,
+		Payload: payload,
 	}
 	return nil
 }

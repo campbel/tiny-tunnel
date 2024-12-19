@@ -113,7 +113,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Plain HTTP request
 		responseChan := make(chan (types.Message))
 		tunnel.Send(
-			types.MessageKindRequest,
+			types.MessageKindHttpRequest,
 			types.HTTPRequest{
 				Method:    r.Method,
 				Path:      r.URL.Path + "?" + r.URL.Query().Encode(),
@@ -124,7 +124,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			responseChan,
 		)
 		responseMessage := <-responseChan
-		if responseMessage.Kind != types.MessageKindResponse {
+		if responseMessage.Kind != types.MessageKindHttpResponse {
 			http.Error(w, "there was an error processing your request", http.StatusInternalServerError)
 			return
 		}
@@ -155,21 +155,26 @@ func createWebSocketHandler(tunnel *Tunnel) http.Handler {
 				log.Info("closing reads", "name", tunnel.ID)
 			}()
 			for {
-				buffer := make([]byte, 1024)
+				var buffer []byte
 				if err := websocket.Message.Receive(ws, &buffer); err != nil {
-					log.Info("error reading response", "err", err.Error(), "name", tunnel.ID)
+					log.Info("error receiving message", "err", err.Error(), "name", tunnel.ID)
 					return
 				}
 				message := types.LoadMessage(buffer)
-				switch message.Kind {
-				case types.MessageKindWebsocketCreateResponse:
-					if responseChan, ok := tunnel.Responses.Get(message.ID); !ok {
-						log.Info("response undeliverable", "id", message.ID, "name", tunnel.ID)
+
+				// Handle messages with expected responses
+				if message.ResponseTo != "" {
+					if responseChan, ok := tunnel.Responses.Get(message.ResponseTo); !ok {
+						log.Error("response undeliverable", "id", message.ResponseTo, "name", tunnel.ID)
 					} else {
 						responseChan <- message
-						tunnel.Responses.Delete(message.ID)
+						tunnel.Responses.Delete(message.ResponseTo)
 					}
-				case types.MessageKindWebsocketMessage:
+					continue
+				}
+
+				// Handle websocket messages
+				if message.Kind == types.MessageKindWebsocketMessage {
 					message := types.LoadWebsocketMessage(message.Payload)
 					wsConn, ok := tunnel.WSSessions.Get(message.SessionID)
 					if !ok {
@@ -179,14 +184,7 @@ func createWebSocketHandler(tunnel *Tunnel) http.Handler {
 					if err := websocket.Message.Send(wsConn, message.Data); err != nil {
 						log.Info("failed to send message to websocket", "error", err.Error())
 					}
-
-				case types.MessageKindResponse:
-					if responseChan, ok := tunnel.Responses.Get(message.ID); !ok {
-						log.Info("response undeliverable", "id", message.ID, "name", tunnel.ID)
-					} else {
-						responseChan <- message
-						tunnel.Responses.Delete(message.ID)
-					}
+					continue
 				}
 			}
 		}()

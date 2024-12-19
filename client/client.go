@@ -86,12 +86,10 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 			message := types.LoadMessage(buffer)
 			switch message.Kind {
 			case types.MessageKindWebsocketCreateRequest:
-				id := util.RandString(20)
-				_ = types.LoadWebsocketCreateRequest(message.Payload)
-				response := types.WebsocketCreateResponse{
-					SessionID: id,
-				}
+				sessionID := util.RandString(20)
+				request := types.LoadWebsocketCreateRequest(message.Payload)
 
+				// update the url
 				url_, err := url.ParseRequestURI(options.Target)
 				if err != nil {
 					log.Info("failed to parse target url", "error", err.Error())
@@ -106,38 +104,41 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 					log.Info("unsupported scheme", "scheme", url_.Scheme)
 					return
 				}
+				url_.Path = request.Path
+
 				appWSConn, err := websocket.Dial(url_.String(), "", origin)
 				if err != nil {
 					log.Info("failed to dial websocket", "error", err.Error())
 					return
 				}
-				if !wsConnections.SetNX(id, appWSConn) {
+				if !wsConnections.SetNX(sessionID, appWSConn) {
 					log.Info("failed to set websocket connection")
 					return
 				}
 				// Read messages
-				go func(id string) {
+				go func(sessionID string) {
 					for {
 						buffer := make([]byte, 1024)
 						if err := websocket.Message.Receive(appWSConn, &buffer); err != nil {
 							break
 						}
-						websocket.Message.Send(tunnelWSConn, types.Message{
-							ID:   message.ID,
-							Kind: types.MessageKindWebsocketMessage,
-							Payload: types.WebsocketMessage{
-								SessionID: id,
+						websocket.Message.Send(tunnelWSConn, types.NewMessage(
+							types.MessageKindWebsocketMessage,
+							types.WebsocketMessage{
+								SessionID: sessionID,
 								Data:      buffer,
-							}.JSON(),
-						}.JSON())
+							},
+						).JSON())
 					}
-				}(id)
+				}(sessionID)
 
-				if err := websocket.Message.Send(tunnelWSConn, types.Message{
-					ID:      message.ID,
-					Kind:    types.MessageKindWebsocketCreateResponse,
-					Payload: response.JSON(),
-				}.JSON()); err != nil {
+				if err := websocket.Message.Send(tunnelWSConn, types.NewResponseMessage(
+					message.ID,
+					types.MessageKindWebsocketCreateResponse,
+					types.WebsocketCreateResponse{
+						SessionID: sessionID,
+					},
+				).JSON()); err != nil {
 					log.Info("failed to send response to server", "error", err.Error())
 				}
 			case types.MessageKindWebsocketMessage:
@@ -151,14 +152,14 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 					log.Info("failed to send message to websocket", "error", err.Error())
 				}
 
-			case types.MessageKindRequest:
+			case types.MessageKindHttpRequest:
 				request := types.LoadRequest(message.Payload)
 				response := handler(request)
-				if err := websocket.Message.Send(tunnelWSConn, types.Message{
-					ID:      message.ID,
-					Kind:    types.MessageKindResponse,
-					Payload: response.JSON(),
-				}.JSON()); err != nil {
+				if err := websocket.Message.Send(tunnelWSConn, types.NewResponseMessage(
+					message.ID,
+					types.MessageKindHttpResponse,
+					response,
+				).JSON()); err != nil {
 					log.Info("failed to send response to server", "error", err.Error())
 				}
 			}
