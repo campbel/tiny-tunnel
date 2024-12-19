@@ -104,7 +104,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					if err := websocket.Message.Receive(ws, &buffer); err != nil {
 						break
 					}
-					log.Info("received websocket message", "session_id", response.SessionID, "tunnel", tunnel.ID)
+					log.Info("received websocket message, sending through tunnel", "session_id", response.SessionID, "tunnel", tunnel.ID)
 					tunnel.Send(
 						types.MessageKindWebsocketMessage,
 						types.WebsocketMessage{
@@ -191,7 +191,7 @@ func createWebSocketHandler(tunnel *Tunnel) http.Handler {
 						continue
 					}
 					log.Info("sending websocket message", "session_id", wsMessage.SessionID, "data", string(wsMessage.Data))
-					if err := websocket.Message.Send(wsConn, wsMessage.Data); err != nil {
+					if err := websocket.Message.Send(wsConn, string(wsMessage.Data)); err != nil {
 						log.Info("failed to send message to websocket", "error", err.Error())
 						continue
 					}

@@ -152,6 +152,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 				}
 			case types.MessageKindWebsocketMessage:
 				message := types.LoadWebsocketMessage(message.Payload)
+				log.Info("received websocket message from server, sending to app", "session_id", message.SessionID)
 				wsConn, ok := wsConnections.Get(message.SessionID)
 				if !ok {
 					log.Info("failed to get websocket connection", "session_id", message.SessionID)
@@ -160,6 +161,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 				if err := websocket.Message.Send(wsConn, message.Data); err != nil {
 					log.Info("failed to send message to websocket", "error", err.Error())
 				}
+				log.Info("message sent to websocket successfully", "session_id", message.SessionID)
 
 			case types.MessageKindHttpRequest:
 				request := types.LoadRequest(message.Payload)
