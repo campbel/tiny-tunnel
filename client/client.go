@@ -3,12 +3,16 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	tthttp "github.com/campbel/tiny-tunnel/http"
 	"github.com/campbel/tiny-tunnel/log"
 	"github.com/campbel/tiny-tunnel/types"
+	"github.com/campbel/tiny-tunnel/util"
 	"golang.org/x/net/websocket"
+
+	"github.com/campbel/tiny-tunnel/sync"
 )
 
 func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
@@ -35,7 +39,7 @@ func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
 func Connect(ctx context.Context, options ConnectOptions) (chan bool, error) {
 	return ConnectRaw(
 		options.URL(), options.Origin(), options.ServerHeaders,
-		func(request types.Request) types.Response {
+		func(request types.HTTPRequest) types.HTTPResponse {
 			for k, v := range options.TargetHeaders {
 				request.Headers.Add(k, v)
 			}
@@ -46,20 +50,23 @@ func Connect(ctx context.Context, options ConnectOptions) (chan bool, error) {
 				"res_status", response.Status, "res_error", response.Error, "res_headers", response.Headers,
 			)
 			return response
-		})
+		}, options)
 }
 
-func ConnectRaw(url, origin string, serverHeaders map[string]string, handler func(types.Request) types.Response) (chan bool, error) {
+func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler func(types.HTTPRequest) types.HTTPResponse, options ConnectOptions) (chan bool, error) {
+
+	// Defined a websocket connection map
+	wsConnections := sync.NewMap[string, *websocket.Conn]()
 
 	// Establish a ws connection to the server
-	config, err := websocket.NewConfig(url, origin)
+	config, err := websocket.NewConfig(rawURL, origin)
 	if err != nil {
 		return nil, err
 	}
 	for k, v := range serverHeaders {
 		config.Header.Add(k, v)
 	}
-	ws, err := websocket.DialConfig(config)
+	tunnelWSConn, err := websocket.DialConfig(config)
 	if err != nil {
 		return nil, err
 	}
@@ -73,15 +80,81 @@ func ConnectRaw(url, origin string, serverHeaders map[string]string, handler fun
 	go func(c chan bool) {
 		for {
 			buffer := make([]byte, 1024)
-			if err := websocket.Message.Receive(ws, &buffer); err != nil {
+			if err := websocket.Message.Receive(tunnelWSConn, &buffer); err != nil {
 				break
 			}
 			message := types.LoadMessage(buffer)
 			switch message.Kind {
+			case types.MessageKindWebsocketCreateRequest:
+				id := util.RandString(20)
+				_ = types.LoadWebsocketCreateRequest(message.Payload)
+				response := types.WebsocketCreateResponse{
+					SessionID: id,
+				}
+
+				url_, err := url.ParseRequestURI(options.Target)
+				if err != nil {
+					log.Info("failed to parse target url", "error", err.Error())
+					return
+				}
+				switch url_.Scheme {
+				case "http":
+					url_.Scheme = "ws"
+				case "https":
+					url_.Scheme = "wss"
+				default:
+					log.Info("unsupported scheme", "scheme", url_.Scheme)
+					return
+				}
+				appWSConn, err := websocket.Dial(url_.String(), "", origin)
+				if err != nil {
+					log.Info("failed to dial websocket", "error", err.Error())
+					return
+				}
+				if !wsConnections.SetNX(id, appWSConn) {
+					log.Info("failed to set websocket connection")
+					return
+				}
+				// Read messages
+				go func(id string) {
+					for {
+						buffer := make([]byte, 1024)
+						if err := websocket.Message.Receive(appWSConn, &buffer); err != nil {
+							break
+						}
+						websocket.Message.Send(tunnelWSConn, types.Message{
+							ID:   message.ID,
+							Kind: types.MessageKindWebsocketMessage,
+							Payload: types.WebsocketMessage{
+								SessionID: id,
+								Data:      buffer,
+							}.JSON(),
+						}.JSON())
+					}
+				}(id)
+
+				if err := websocket.Message.Send(tunnelWSConn, types.Message{
+					ID:      message.ID,
+					Kind:    types.MessageKindWebsocketCreateResponse,
+					Payload: response.JSON(),
+				}.JSON()); err != nil {
+					log.Info("failed to send response to server", "error", err.Error())
+				}
+			case types.MessageKindWebsocketMessage:
+				message := types.LoadWebsocketMessage(message.Payload)
+				wsConn, ok := wsConnections.Get(message.SessionID)
+				if !ok {
+					log.Info("failed to get websocket connection", "session_id", message.SessionID)
+					return
+				}
+				if err := websocket.Message.Send(wsConn, message.Data); err != nil {
+					log.Info("failed to send message to websocket", "error", err.Error())
+				}
+
 			case types.MessageKindRequest:
 				request := types.LoadRequest(message.Payload)
 				response := handler(request)
-				if err := websocket.Message.Send(ws, types.Message{
+				if err := websocket.Message.Send(tunnelWSConn, types.Message{
 					ID:      message.ID,
 					Kind:    types.MessageKindResponse,
 					Payload: response.JSON(),

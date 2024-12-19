@@ -103,6 +103,9 @@ func AllowedIP(r *http.Request, allowedIPs []string) bool {
 //
 //	shopify.com -> shopify.com
 func getHostname(r *http.Request) string {
+	if host := r.Header.Get("X-TT-Host"); host != "" {
+		return host
+	}
 	if strings.Contains(r.Host, ":") {
 		return r.Host[:strings.LastIndex(r.Host, ":")]
 	}

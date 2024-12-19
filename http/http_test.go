@@ -12,7 +12,7 @@ import (
 func TestDo(t *testing.T) {
 	assert := assert.New(t)
 
-	req := types.Request{
+	req := types.HTTPRequest{
 		Method:  "GET",
 		Path:    "/",
 		Body:    []byte{},

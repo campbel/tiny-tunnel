@@ -101,41 +101,38 @@ func TestServerWebSocket(t *testing.T) {
 		return
 	}
 	defer ws.Close()
-	err = websocket.Message.Send(ws, []byte("Hello, World!"))
+	if err := websocket.Message.Send(ws, []byte("Hello, World!")); !assert.NoError(err) {
+		return
+	}
+	var buffer []byte
+	if err := websocket.Message.Receive(ws, &buffer); !assert.NoError(err) {
+		return
+	}
+	assert.Equal("Hello, World!", string(buffer))
+
+	// Make a websocket request to the tt-server
+	config, err := websocket.NewConfig(fmt.Sprintf("ws://%s:%s", serverHost, serverPort), fmt.Sprintf("http://%s.%s", tunnelName, serverDomain))
 	if !assert.NoError(err) {
 		return
 	}
-	var message []byte
-	bufferSize := 1024
-	for {
-		buffer := make([]byte, bufferSize)
-		n, err := ws.Read(buffer)
-		if !assert.NoError(err) {
+	config.Header = http.Header{
+		"X-TT-Host": []string{fmt.Sprintf("%s.%s", tunnelName, serverDomain)},
+	}
+	ws, err = websocket.DialConfig(config)
+	if !assert.NoError(err) {
+		return
+	}
+	defer ws.Close()
+	for i := range 5 {
+		if err := websocket.Message.Send(ws, []byte(fmt.Sprintf("Hello, World! %d", i))); !assert.NoError(err) {
 			return
 		}
-		message = append(message, buffer[:n]...)
-		if n < bufferSize {
-			break
+		var buffer []byte
+		if err := websocket.Message.Receive(ws, &buffer); !assert.NoError(err) {
+			return
 		}
+		assert.Equal(fmt.Sprintf("Hello, World! %d", i), string(buffer))
 	}
-	assert.Equal("!dlroW ,olleH", string(message))
-
-	// // Make a websocket request to the tt-server
-	// ws, err = websocket.Dial(fmt.Sprintf("ws://%s:%s/ws/%s", serverHost, serverPort, tunnelName), "", fmt.Sprintf("http://%s.%s", tunnelName, serverDomain))
-	// if !assert.NoError(err) {
-	// 	return
-	// }
-	// defer ws.Close()
-	// err = websocket.Message.Send(ws, []byte("Hello, World!"))
-	// if !assert.NoError(err) {
-	// 	return
-	// }
-	// message = make([]byte, 1024)
-	// _, err = ws.Read(message)
-	// if !assert.NoError(err) {
-	// 	return
-	// }
-	// assert.Equal("!dlroW ,olleH", string(message))
 }
 
 func getServerAndPortFromURL(t *testing.T, rawURL string) (string, string) {
@@ -151,19 +148,14 @@ func createEchoWebsocketHandler(t *testing.T) websocket.Handler {
 	t.Helper()
 	return websocket.Handler(func(ws *websocket.Conn) {
 		defer ws.Close()
-		var message []byte
-		bufferSize := 1024
 		for {
-			buffer := make([]byte, bufferSize)
-			n, err := ws.Read(buffer)
-			if !assert.NoError(t, err) {
-				t.FailNow()
+			var buffer []byte
+			if err := websocket.Message.Receive(ws, &buffer); !assert.NoError(t, err) {
+				return
 			}
-			message = append(message, buffer[:n]...)
-			if n < bufferSize {
-				break
+			if err := websocket.Message.Send(ws, buffer); !assert.NoError(t, err) {
+				return
 			}
 		}
-		websocket.Message.Send(ws, message)
 	})
 }
