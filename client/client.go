@@ -2,9 +2,7 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"net/url"
-	"time"
 
 	tthttp "github.com/campbel/tiny-tunnel/http"
 	"github.com/campbel/tiny-tunnel/log"
@@ -44,11 +42,11 @@ func Connect(ctx context.Context, options ConnectOptions) (chan bool, error) {
 				request.Headers.Add(k, v)
 			}
 			response := tthttp.Do(options.Target, request)
-			log.Info("finished",
-				"elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds()),
-				"req_method", request.Method, "req_path", request.Path, "req_headers", request.Headers,
-				"res_status", response.Status, "res_error", response.Error, "res_headers", response.Headers,
-			)
+			// log.Info("finished",
+			// 	"elapsed", fmt.Sprintf("%dms", time.Since(request.CreatedAt).Milliseconds()),
+			// 	"req_method", request.Method, "req_path", request.Path, "req_headers", request.Headers,
+			// 	"res_status", response.Status, "res_error", response.Error, "res_headers", response.Headers,
+			// )
 			return response
 		}, options)
 }
@@ -88,6 +86,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 			case types.MessageKindWebsocketCreateRequest:
 				sessionID := util.RandString(20)
 				request := types.LoadWebsocketCreateRequest(message.Payload)
+				log.Info("request for new websocket", "session_id", sessionID)
 
 				// update the url
 				url_, err := url.ParseRequestURI(options.Target)
@@ -106,7 +105,16 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 				}
 				url_.Path = request.Path
 
-				appWSConn, err := websocket.Dial(url_.String(), "", origin)
+				config, err := websocket.NewConfig(url_.String(), origin)
+				if err != nil {
+					log.Info("failed to create websocket config", "error", err.Error())
+				}
+				for k, v := range request.Headers {
+					for _, vv := range v {
+						config.Header.Add(k, vv)
+					}
+				}
+				appWSConn, err := websocket.DialConfig(config)
 				if err != nil {
 					log.Info("failed to dial websocket", "error", err.Error())
 					return
@@ -122,6 +130,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 						if err := websocket.Message.Receive(appWSConn, &buffer); err != nil {
 							break
 						}
+						log.Info("received websocket message", "session_id", sessionID, "data", string(buffer))
 						websocket.Message.Send(tunnelWSConn, types.NewMessage(
 							types.MessageKindWebsocketMessage,
 							types.WebsocketMessage{

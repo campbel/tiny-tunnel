@@ -184,16 +184,18 @@ func createWebSocketHandler(tunnel *Tunnel) http.Handler {
 
 				// Handle websocket messages
 				if message.Kind == types.MessageKindWebsocketMessage {
-					message := types.LoadWebsocketMessage(message.Payload)
-					wsConn, ok := tunnel.WSSessions.Get(message.SessionID)
+					wsMessage := types.LoadWebsocketMessage(message.Payload)
+					wsConn, ok := tunnel.WSSessions.Get(wsMessage.SessionID)
 					if !ok {
-						log.Info("failed to get websocket connection", "session_id", message.SessionID)
+						log.Info("failed to get websocket connection", "session_id", wsMessage.SessionID)
 						continue
 					}
-					if err := websocket.Message.Send(wsConn, message.Data); err != nil {
+					log.Info("sending websocket message", "session_id", wsMessage.SessionID, "data", string(wsMessage.Data))
+					if err := websocket.Message.Send(wsConn, wsMessage.Data); err != nil {
 						log.Info("failed to send message to websocket", "error", err.Error())
 						continue
 					}
+					log.Info("websocket message sent successfully", "session_id", wsMessage.SessionID, "data", string(wsMessage.Data))
 				}
 			}
 		}()
