@@ -25,18 +25,17 @@ var httpClient = func() http.Client {
 	}
 }()
 
-func Do(target string, req types.Request) types.Response {
+func Do(target string, req types.HTTPRequest) types.HTTPResponse {
 	request, err := http.NewRequest(req.Method, target+req.Path, bytes.NewBuffer(req.Body))
 	util.Must(err)
 	request.Header = req.Headers
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return types.Response{Error: err.Error()}
+		return types.HTTPResponse{Error: err.Error()}
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
-	return types.Response{
-		ID:      req.ID,
+	return types.HTTPResponse{
 		Status:  response.StatusCode,
 		Headers: response.Header,
 		Body:    body,
