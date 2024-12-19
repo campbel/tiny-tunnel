@@ -91,11 +91,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			log.Info("websocket create response", "session_id", response.SessionID, "tunnel", tunnel.ID)
 			websocket.Handler(func(ws *websocket.Conn) {
+				log.Info("starting ws handler", "session_id", response.SessionID, "tunnel", tunnel.ID)
 				if !tunnel.WSSessions.SetNX(response.SessionID, ws) {
 					log.Info("failed to set websocket session", "session_id", response.SessionID)
 					return
 				}
+
 				// Listen for messages
+				log.Info("listening for websocket messages", "session_id", response.SessionID, "tunnel", tunnel.ID)
 				for {
 					var buffer []byte
 					if err := websocket.Message.Receive(ws, &buffer); err != nil {
@@ -185,12 +188,12 @@ func createWebSocketHandler(tunnel *Tunnel) http.Handler {
 					wsConn, ok := tunnel.WSSessions.Get(message.SessionID)
 					if !ok {
 						log.Info("failed to get websocket connection", "session_id", message.SessionID)
-						return
+						continue
 					}
 					if err := websocket.Message.Send(wsConn, message.Data); err != nil {
 						log.Info("failed to send message to websocket", "error", err.Error())
+						continue
 					}
-					continue
 				}
 			}
 		}()
