@@ -118,7 +118,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 				// Read messages
 				go func(sessionID string) {
 					for {
-						buffer := make([]byte, 1024)
+						var buffer []byte
 						if err := websocket.Message.Receive(appWSConn, &buffer); err != nil {
 							break
 						}
