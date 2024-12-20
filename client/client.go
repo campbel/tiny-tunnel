@@ -2,11 +2,11 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"time"
 
-	tthttp "github.com/campbel/tiny-tunnel/http"
 	"github.com/campbel/tiny-tunnel/log"
 	"github.com/campbel/tiny-tunnel/types"
 	"github.com/campbel/tiny-tunnel/util"
@@ -14,6 +14,8 @@ import (
 	"github.com/campbel/tiny-tunnel/sync"
 
 	"github.com/gorilla/websocket"
+
+	tthttp "github.com/campbel/tiny-tunnel/http"
 )
 
 func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
@@ -38,35 +40,17 @@ func ConnectAndHandle(ctx context.Context, options ConnectOptions) error {
 }
 
 func Connect(ctx context.Context, options ConnectOptions) (chan bool, error) {
-	return ConnectRaw(
-		options.URL(), options.Origin(), options.ServerHeaders,
-		func(request types.HTTPRequest) types.HTTPResponse {
-			for k, v := range options.TargetHeaders {
-				request.Headers.Add(k, v)
-			}
-			return tthttp.Do(options.Target, request)
-		}, options)
-}
 
-func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler func(types.HTTPRequest) types.HTTPResponse, options ConnectOptions) (chan bool, error) {
-
-	// Defined a websocket connection map
+	// Websocket proxying between the tt-client and the tt-server are correlated by sessionID
+	// This map is used to store the websocket connections for each sessionID
+	// These websocket connections are multiplexed over the same connection to the tt-server
 	wsConnections := sync.NewMap[string, *sync.WSConn]()
 
-	// Establish a ws connection to the server
-	dialer := websocket.Dialer{}
-	headers := http.Header{}
-	headers.Add("Origin", origin)
-	for k, v := range options.ServerHeaders {
-		headers.Add(k, v)
-	}
-
-	rawConn, _, err := dialer.Dial(rawURL, headers)
+	// Establish a connection to the tt-server
+	tunnelConn, err := connectToTTServer(ctx, options)
 	if err != nil {
 		return nil, err
 	}
-
-	conn := sync.NewWSConn(rawConn)
 
 	log.Info("connected to server")
 
@@ -79,7 +63,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 		for {
 			select {
 			case <-ticker.C:
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				if err := tunnelConn.WriteMessage(websocket.PingMessage, nil); err != nil {
 					log.Info("failed to send ping", "error", err.Error())
 					return
 				}
@@ -93,7 +77,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 	// Read requests from the server
 	go func(c chan bool) {
 		for {
-			mt, data, err := conn.ReadMessage()
+			mt, data, err := tunnelConn.ReadMessage()
 			if err != nil {
 				break
 			}
@@ -103,14 +87,9 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 				return
 			}
 
-			// Handle ping messages
-			if mt == websocket.PingMessage {
-				if err := conn.WriteMessage(websocket.PongMessage, nil); err != nil {
-					log.Info("failed to send pong", "error", err.Error())
-					return
-				}
-			}
-			if mt == websocket.PongMessage {
+			// At this point we only expect binary messages which enclose a message
+			if mt != websocket.BinaryMessage {
+				log.Info("unsupported message type received", "type", mt)
 				continue
 			}
 
@@ -122,31 +101,36 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 				log.Info("request for new websocket", "session_id", sessionID)
 
 				// update the url
-				url_, err := url.ParseRequestURI(options.Target)
+				url_, err := getWSURL(options.Target, request.Path)
 				if err != nil {
-					log.Info("failed to parse target url", "error", err.Error())
+					log.Info("failed to get websocket url", "error", err.Error())
 					return
 				}
-				switch url_.Scheme {
-				case "http":
-					url_.Scheme = "ws"
-				case "https":
-					url_.Scheme = "wss"
-				default:
-					log.Info("unsupported scheme", "scheme", url_.Scheme)
-					return
-				}
-				url_.Path = request.Path
 
 				dialer := websocket.Dialer{}
 				headers := http.Header{}
 				headers.Add("Origin", request.Origin)
 
-				rawAppConn, _, err := dialer.Dial(url_.String(), headers)
+				rawAppConn, _, err := dialer.DialContext(ctx, url_.String(), headers)
 				if err != nil {
 					log.Info("failed to dial websocket", "error", err.Error())
 					panic(err)
 				}
+
+				rawAppConn.SetPingHandler(func(appData string) error {
+					return tunnelConn.WriteMessage(websocket.BinaryMessage, types.NewMessage(
+						types.MessageKindWebsocketMessage,
+						types.NewPingWebsocketMessage(sessionID, []byte(appData)),
+					).JSON())
+				})
+
+				rawAppConn.SetPongHandler(func(appData string) error {
+					return tunnelConn.WriteMessage(websocket.BinaryMessage, types.NewMessage(
+						types.MessageKindWebsocketMessage,
+						types.NewPongWebsocketMessage(sessionID, []byte(appData)),
+					).JSON())
+				})
+
 				appCon := sync.NewWSConn(rawAppConn)
 
 				if !wsConnections.SetNX(sessionID, appCon) {
@@ -160,7 +144,7 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 						if err != nil {
 							log.Info("error reading message, closing websocket", "err", err.Error(), "session_id", sessionID)
 							wsConnections.Delete(sessionID)
-							conn.WriteMessage(websocket.BinaryMessage, types.NewMessage(
+							tunnelConn.WriteMessage(websocket.BinaryMessage, types.NewMessage(
 								types.MessageKindWebsocketClose,
 								types.WebsocketCloseMessage{
 									SessionID: sessionID,
@@ -170,20 +154,24 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 						}
 						var wsMsg types.WebsocketMessage
 						switch mt {
+						case websocket.PingMessage:
+							wsMsg = types.NewPingWebsocketMessage(sessionID, data)
+						case websocket.PongMessage:
+							wsMsg = types.NewPongWebsocketMessage(sessionID, data)
 						case websocket.BinaryMessage:
 							wsMsg = types.NewBinaryWebsocketMessage(sessionID, data)
 						case websocket.TextMessage:
 							wsMsg = types.NewStringWebsocketMessage(sessionID, string(data))
 						}
 
-						conn.WriteMessage(websocket.BinaryMessage, types.NewMessage(
+						tunnelConn.WriteMessage(websocket.BinaryMessage, types.NewMessage(
 							types.MessageKindWebsocketMessage,
 							wsMsg,
 						).JSON())
 					}
 				}(sessionID)
 
-				if err := conn.WriteMessage(websocket.BinaryMessage, types.NewResponseMessage(
+				if err := tunnelConn.WriteMessage(websocket.BinaryMessage, types.NewResponseMessage(
 					message.ID,
 					types.MessageKindWebsocketCreateResponse,
 					types.WebsocketCreateResponse{
@@ -200,22 +188,50 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 					log.Info("failed to get websocket connection", "session_id", message.SessionID)
 					return
 				}
-				if message.IsBinary() {
+				switch message.DataType {
+				case websocket.PingMessage:
+					if err := wsConn.WriteMessage(websocket.PingMessage, message.BinaryData); err != nil {
+						log.Info("failed to send pong to websocket", "error", err.Error())
+						continue
+					}
+				case websocket.PongMessage:
+					if err := wsConn.WriteMessage(websocket.PongMessage, message.BinaryData); err != nil {
+						log.Info("failed to send ping to websocket", "error", err.Error())
+						continue
+					}
+				case websocket.BinaryMessage:
 					if err := wsConn.WriteMessage(websocket.BinaryMessage, message.BinaryData); err != nil {
 						log.Info("failed to send message to websocket", "error", err.Error())
 						continue
 					}
-				} else {
+				case websocket.TextMessage:
 					if err := wsConn.WriteMessage(websocket.TextMessage, []byte(message.StringData)); err != nil {
 						log.Info("failed to send message to websocket", "error", err.Error())
 						continue
 					}
 				}
 
+			case types.MessageKindWebsocketClose:
+				closeMessage := types.LoadWebsocketCloseMessage(message.Payload)
+				appWSConn, ok := wsConnections.Get(closeMessage.SessionID)
+				if !ok {
+					log.Info("failed to get websocket connection", "session_id", closeMessage.SessionID)
+					return
+				}
+				if err := appWSConn.Close(); err != nil {
+					log.Info("failed to close websocket connection", "session_id", closeMessage.SessionID, "error", err.Error())
+				}
+				wsConnections.Delete(closeMessage.SessionID)
+
 			case types.MessageKindHttpRequest:
 				request := types.LoadRequest(message.Payload)
-				response := handler(request)
-				if err := conn.WriteMessage(websocket.BinaryMessage, types.NewResponseMessage(
+
+				for k, v := range options.TargetHeaders {
+					request.Headers.Add(k, v)
+				}
+				response := tthttp.Do(options.Target, request)
+
+				if err := tunnelConn.WriteMessage(websocket.BinaryMessage, types.NewResponseMessage(
 					message.ID,
 					types.MessageKindHttpResponse,
 					response,
@@ -229,4 +245,37 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 	}(closed)
 
 	return closed, nil
+}
+
+func connectToTTServer(ctx context.Context, options ConnectOptions) (*sync.WSConn, error) {
+	dialer := websocket.Dialer{}
+	headers := http.Header{}
+	headers.Add("Origin", options.Origin())
+	for k, v := range options.ServerHeaders {
+		headers.Add(k, v)
+	}
+
+	rawConn, _, err := dialer.DialContext(ctx, options.URL(), headers)
+	if err != nil {
+		return nil, err
+	}
+	return sync.NewWSConn(rawConn), nil
+}
+
+func getWSURL(target string, path string) (*url.URL, error) {
+	url_, err := url.ParseRequestURI(target)
+	if err != nil {
+		return nil, err
+	}
+	url_.Path = path
+	switch url_.Scheme {
+	case "http":
+		url_.Scheme = "ws"
+	case "https":
+		url_.Scheme = "wss"
+	default:
+		return nil, fmt.Errorf("unsupported scheme: %s", url_.Scheme)
+	}
+	url_.Path = path
+	return url_, nil
 }

@@ -80,18 +80,6 @@ func (t *Tunnel) Run(w http.ResponseWriter, r *http.Request) error {
 				return
 			}
 
-			/// Handle ping messages
-			if mt == websocket.PingMessage {
-				if err := conn.WriteMessage(websocket.PongMessage, nil); err != nil {
-					log.Info("failed to send pong", "error", err.Error())
-					return
-				}
-				continue
-			}
-			if mt == websocket.PongMessage {
-				continue
-			}
-
 			message := types.LoadMessage(data)
 
 			// Handle messages with expected responses
@@ -113,19 +101,30 @@ func (t *Tunnel) Run(w http.ResponseWriter, r *http.Request) error {
 					log.Warn("failed to get websocket connection", "tunnel", t.ID, "session", wsMessage.SessionID)
 					continue
 				}
-
-				if wsMessage.IsBinary() {
+				switch wsMessage.DataType {
+				case websocket.PingMessage:
+					if err := wsConn.WriteMessage(websocket.PingMessage, wsMessage.BinaryData); err != nil {
+						log.Error("failed to send pong to websocket", "tunnel", t.ID, "session", wsMessage.SessionID, "error", err.Error())
+						continue
+					}
+				case websocket.PongMessage:
+					if err := wsConn.WriteMessage(websocket.PongMessage, wsMessage.BinaryData); err != nil {
+						log.Error("failed to send ping to websocket", "tunnel", t.ID, "session", wsMessage.SessionID, "error", err.Error())
+						continue
+					}
+				case websocket.BinaryMessage:
 					if err := wsConn.WriteMessage(websocket.BinaryMessage, wsMessage.BinaryData); err != nil {
 						log.Error("failed to send message to websocket", "tunnel", t.ID, "session", wsMessage.SessionID, "error", err.Error())
 						continue
 					}
-				} else {
+				case websocket.TextMessage:
 					if err := wsConn.WriteMessage(websocket.TextMessage, []byte(wsMessage.StringData)); err != nil {
 						log.Error("failed to send message to websocket", "tunnel", t.ID, "session", wsMessage.SessionID, "error", err.Error())
 						continue
 					}
 				}
 				log.Info("websocket message sent successfully", "tunnel", t.ID, "session", wsMessage.SessionID, "data", string(wsMessage.BinaryData))
+				continue
 			}
 
 			// Handle websocket close messages
@@ -140,6 +139,7 @@ func (t *Tunnel) Run(w http.ResponseWriter, r *http.Request) error {
 					log.Error("failed to close websocket connection", "tunnel", t.ID, "session", wsMessage.SessionID, "error", err.Error())
 				}
 				t.WSSessions.Delete(wsMessage.SessionID)
+				continue
 			}
 		}
 	}()

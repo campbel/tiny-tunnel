@@ -74,8 +74,10 @@ func TestServerWebSocket(t *testing.T) {
 	serverDomain := "example.com"
 	ttServer := httptest.NewServer(NewHandler(serverDomain))
 
+	wsClosed := make(chan bool)
 	appServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleWebsocketConn(t, w, r)
+		wsClosed <- true
 	}))
 
 	// Connect as a tt-client to the tt-server
@@ -97,30 +99,31 @@ func TestServerWebSocket(t *testing.T) {
 	// Make a websocket request to the app-server (verify that it works without tt)
 	appHost, appPort := getServerAndPortFromURL(t, appServer.URL)
 
-	dialer := websocket.Dialer{}
-	headers := http.Header{}
-	headers.Add("Origin", fmt.Sprintf("http://%s.%s", tunnelName, serverDomain))
-	conn, _, err := dialer.Dial(fmt.Sprintf("ws://%s:%s", appHost, appPort), headers)
-	if !assert.NoError(err) {
-		return
-	}
-	defer conn.Close()
-	if err := conn.WriteMessage(websocket.TextMessage, []byte("Hello, World!")); !assert.NoError(err) {
-		return
-	}
-	wt, buffer, err := conn.ReadMessage()
-	if !assert.NoError(err) {
-		return
-	}
-	assert.Equal(websocket.TextMessage, wt)
-	assert.Equal("Hello, World!", string(buffer))
+	func() {
+		conn, _, err := websocket.DefaultDialer.DialContext(ctx, fmt.Sprintf("ws://%s:%s", appHost, appPort), http.Header{
+			"Origin": []string{fmt.Sprintf("http://%s.%s", tunnelName, serverDomain)},
+		})
+		if !assert.NoError(err) {
+			return
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, []byte("Hello, World!")); !assert.NoError(err) {
+			return
+		}
+		wt, buffer, err := conn.ReadMessage()
+		if !assert.NoError(err) {
+			return
+		}
+		assert.Equal(websocket.TextMessage, wt)
+		assert.Equal("Hello, World!", string(buffer))
+		assert.NoError(conn.Close())
+		assert.True(<-wsClosed)
+	}()
 
 	// Make a websocket request to the tt-server
-	dialer = websocket.Dialer{}
-	headers = http.Header{}
-	headers.Add("Origin", fmt.Sprintf("http://%s.%s", tunnelName, serverDomain))
-	headers.Add("X-TT-Host", fmt.Sprintf("%s.%s", tunnelName, serverDomain))
-	conn, _, err = dialer.Dial(fmt.Sprintf("ws://%s:%s", serverHost, serverPort), headers)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, fmt.Sprintf("ws://%s:%s", serverHost, serverPort), http.Header{
+		"Origin":    []string{fmt.Sprintf("http://%s.%s", tunnelName, serverDomain)},
+		"X-TT-Host": []string{fmt.Sprintf("%s.%s", tunnelName, serverDomain)},
+	})
 	if !assert.NoError(err) {
 		return
 	}
@@ -152,9 +155,25 @@ func TestServerWebSocket(t *testing.T) {
 		assert.Equal(data, buffer)
 	}
 
+	pongChannel := make(chan string)
+	conn.SetPongHandler(func(appData string) error {
+		pongChannel <- appData
+		return nil
+	})
+	// ping/pong
+	if err := conn.WriteMessage(websocket.PingMessage, []byte{}); !assert.NoError(err) {
+		return
+	}
+
+	go func() {
+		conn.ReadMessage()
+	}()
+	output := <-pongChannel
+	assert.Equal("pong", output)
+
 	// close
-	err = conn.Close()
-	assert.NoError(err)
+	assert.NoError(conn.Close())
+	assert.True(<-wsClosed)
 }
 
 func getServerAndPortFromURL(t *testing.T, rawURL string) (string, string) {
@@ -181,10 +200,14 @@ func handleWebsocketConn(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	conn.SetPingHandler(func(appData string) error {
+		return conn.WriteMessage(websocket.PongMessage, []byte("pong"))
+	})
+
 	for {
 		mt, data, err := conn.ReadMessage()
 		if err != nil {
-			t.Fatal(err)
+			return
 		}
 
 		switch mt {

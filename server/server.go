@@ -110,6 +110,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				tunnel.WSSessions.Delete(sessionID)
 			}()
 
+			rawConn.SetPingHandler(func(appData string) error {
+				return tunnel.Send(
+					types.MessageKindWebsocketMessage,
+					types.NewPingWebsocketMessage(sessionID, []byte(appData)).JSON(),
+					nil,
+				)
+			})
+
+			rawConn.SetPongHandler(func(appData string) error {
+				return tunnel.Send(
+					types.MessageKindWebsocketMessage,
+					types.NewPongWebsocketMessage(sessionID, []byte(appData)).JSON(),
+					nil,
+				)
+			})
+
 			conn := sync.NewWSConn(rawConn)
 
 			if !tunnel.WSSessions.SetNX(sessionID, conn) {

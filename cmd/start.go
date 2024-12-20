@@ -26,8 +26,7 @@ var startCmd = &cobra.Command{
 	Short: "",
 	Long:  ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := cmd.Context()
-		return client.ConnectAndHandle(ctx, client.ConnectOptions{
+		return client.ConnectAndHandle(cmd.Context(), client.ConnectOptions{
 			Target:            target,
 			Name:              name,
 			ServerHost:        serverHost,

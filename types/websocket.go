@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/campbel/tiny-tunnel/util"
+	"github.com/gorilla/websocket"
 )
 
 type WebsocketCreateRequest struct {
@@ -48,7 +49,7 @@ type WebsocketMessage struct {
 func NewBinaryWebsocketMessage(sessionID string, data []byte) WebsocketMessage {
 	return WebsocketMessage{
 		SessionID:  sessionID,
-		DataType:   1,
+		DataType:   websocket.BinaryMessage,
 		BinaryData: data,
 	}
 }
@@ -56,15 +57,26 @@ func NewBinaryWebsocketMessage(sessionID string, data []byte) WebsocketMessage {
 func NewStringWebsocketMessage(sessionID, data string) WebsocketMessage {
 	return WebsocketMessage{
 		SessionID:  sessionID,
-		DataType:   0,
+		DataType:   websocket.TextMessage,
 		StringData: data,
 	}
 }
 
-func (m WebsocketMessage) IsBinary() bool {
-	return m.DataType == 1
+func NewPingWebsocketMessage(sessionID string, data []byte) WebsocketMessage {
+	return WebsocketMessage{
+		SessionID:  sessionID,
+		DataType:   websocket.PingMessage,
+		BinaryData: data,
+	}
 }
 
+func NewPongWebsocketMessage(sessionID string, data []byte) WebsocketMessage {
+	return WebsocketMessage{
+		SessionID:  sessionID,
+		DataType:   websocket.PongMessage,
+		BinaryData: data,
+	}
+}
 func (m WebsocketMessage) JSON() []byte {
 	return util.JS(m)
 }
