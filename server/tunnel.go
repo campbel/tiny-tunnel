@@ -70,9 +70,26 @@ func (t *Tunnel) Run(w http.ResponseWriter, r *http.Request) error {
 			done <- true
 		}()
 		for {
-			_, data, err := conn.ReadMessage()
+			mt, data, err := conn.ReadMessage()
 			if err != nil {
 				return
+			}
+
+			// Handle close messages
+			if mt == websocket.CloseMessage {
+				return
+			}
+
+			/// Handle ping messages
+			if mt == websocket.PingMessage {
+				if err := conn.WriteMessage(websocket.PongMessage, nil); err != nil {
+					log.Info("failed to send pong", "error", err.Error())
+					return
+				}
+				continue
+			}
+			if mt == websocket.PongMessage {
+				continue
 			}
 
 			message := types.LoadMessage(data)

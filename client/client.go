@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"time"
 
 	tthttp "github.com/campbel/tiny-tunnel/http"
 	"github.com/campbel/tiny-tunnel/log"
@@ -72,12 +73,45 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 	// Close channel when the function returns
 	closed := make(chan bool)
 
+	// Send heartbeats to the server
+	go func(c chan bool) {
+		ticker := time.NewTicker(30 * time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					log.Info("failed to send ping", "error", err.Error())
+					return
+				}
+			case <-c:
+				ticker.Stop()
+				return
+			}
+		}
+	}(closed)
+
 	// Read requests from the server
 	go func(c chan bool) {
 		for {
-			_, data, err := conn.ReadMessage()
+			mt, data, err := conn.ReadMessage()
 			if err != nil {
 				break
+			}
+
+			// Handle close messages
+			if mt == websocket.CloseMessage {
+				return
+			}
+
+			// Handle ping messages
+			if mt == websocket.PingMessage {
+				if err := conn.WriteMessage(websocket.PongMessage, nil); err != nil {
+					log.Info("failed to send pong", "error", err.Error())
+					return
+				}
+			}
+			if mt == websocket.PongMessage {
+				continue
 			}
 
 			message := types.LoadMessage(data)

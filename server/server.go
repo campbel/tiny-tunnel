@@ -12,7 +12,7 @@ import (
 	"github.com/campbel/tiny-tunnel/util"
 	"golang.org/x/crypto/acme/autocert"
 
-	gws "github.com/gorilla/websocket"
+	"github.com/gorilla/websocket"
 )
 
 var (
@@ -95,7 +95,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			response := types.LoadWebsocketCreateResponse(responseMessage.Payload)
 			sessionID := response.SessionID
 
-			upgrader := gws.Upgrader{
+			upgrader := websocket.Upgrader{
 				CheckOrigin: func(r *http.Request) bool {
 					// TODO: Implement a more secure check
 					return true
@@ -125,10 +125,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 				var wsMsg types.WebsocketMessage
 				switch mt {
-				case gws.BinaryMessage:
+				case websocket.BinaryMessage:
 					wsMsg = types.NewBinaryWebsocketMessage(sessionID, data)
-				case gws.TextMessage:
+				case websocket.TextMessage:
 					wsMsg = types.NewStringWebsocketMessage(sessionID, string(data))
+				case websocket.CloseMessage:
+					log.Info("closing websocket", "session_id", sessionID)
+					tunnel.WSSessions.Delete(sessionID)
+					return
 				}
 
 				tunnel.Send(
