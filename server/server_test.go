@@ -124,7 +124,6 @@ func TestServerWebSocket(t *testing.T) {
 	if !assert.NoError(err) {
 		return
 	}
-	defer conn.Close()
 
 	// strings
 	for i := range 5 {
@@ -152,6 +151,10 @@ func TestServerWebSocket(t *testing.T) {
 		assert.Equal(websocket.BinaryMessage, wt)
 		assert.Equal(data, buffer)
 	}
+
+	// close
+	err = conn.Close()
+	assert.NoError(err)
 }
 
 func getServerAndPortFromURL(t *testing.T, rawURL string) (string, string) {

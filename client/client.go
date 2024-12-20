@@ -158,7 +158,14 @@ func ConnectRaw(rawURL, origin string, serverHeaders map[string]string, handler 
 					for {
 						mt, data, err := appCon.ReadMessage()
 						if err != nil {
-							log.Info("error reading message", "err", err.Error(), "session_id", sessionID)
+							log.Info("error reading message, closing websocket", "err", err.Error(), "session_id", sessionID)
+							wsConnections.Delete(sessionID)
+							conn.WriteMessage(websocket.BinaryMessage, types.NewMessage(
+								types.MessageKindWebsocketClose,
+								types.WebsocketCloseMessage{
+									SessionID: sessionID,
+								},
+							).JSON())
 							break
 						}
 						var wsMsg types.WebsocketMessage

@@ -30,3 +30,7 @@ func (w *WSConn) Conn() *websocket.Conn {
 func (w *WSConn) ReadMessage() (int, []byte, error) {
 	return w.conn.ReadMessage()
 }
+
+func (w *WSConn) Close() error {
+	return w.conn.Close()
+}

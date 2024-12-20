@@ -110,22 +110,36 @@ func (t *Tunnel) Run(w http.ResponseWriter, r *http.Request) error {
 				wsMessage := types.LoadWebsocketMessage(message.Payload)
 				wsConn, ok := t.WSSessions.Get(wsMessage.SessionID)
 				if !ok {
-					log.Info("failed to get websocket connection", "session", wsMessage.SessionID)
+					log.Warn("failed to get websocket connection", "tunnel", t.ID, "session", wsMessage.SessionID)
 					continue
 				}
 
 				if wsMessage.IsBinary() {
 					if err := wsConn.WriteMessage(websocket.BinaryMessage, wsMessage.BinaryData); err != nil {
-						log.Info("failed to send message to websocket", "error", err.Error())
+						log.Error("failed to send message to websocket", "tunnel", t.ID, "session", wsMessage.SessionID, "error", err.Error())
 						continue
 					}
 				} else {
 					if err := wsConn.WriteMessage(websocket.TextMessage, []byte(wsMessage.StringData)); err != nil {
-						log.Info("failed to send message to websocket", "error", err.Error())
+						log.Error("failed to send message to websocket", "tunnel", t.ID, "session", wsMessage.SessionID, "error", err.Error())
 						continue
 					}
 				}
-				log.Info("websocket message sent successfully", "session", wsMessage.SessionID, "data", string(wsMessage.BinaryData))
+				log.Info("websocket message sent successfully", "tunnel", t.ID, "session", wsMessage.SessionID, "data", string(wsMessage.BinaryData))
+			}
+
+			// Handle websocket close messages
+			if message.Kind == types.MessageKindWebsocketClose {
+				wsMessage := types.LoadWebsocketCloseMessage(message.Payload)
+				wsConn, ok := t.WSSessions.Get(wsMessage.SessionID)
+				if !ok {
+					log.Warn("failed to get websocket connection that was requested to be closed", "tunnel", t.ID, "session", wsMessage.SessionID)
+					continue
+				}
+				if err := wsConn.Conn().Close(); err != nil {
+					log.Error("failed to close websocket connection", "tunnel", t.ID, "session", wsMessage.SessionID, "error", err.Error())
+				}
+				t.WSSessions.Delete(wsMessage.SessionID)
 			}
 		}
 	}()

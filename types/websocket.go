@@ -74,3 +74,17 @@ func LoadWebsocketMessage(data []byte) WebsocketMessage {
 	util.Must(json.Unmarshal(data, &msg))
 	return msg
 }
+
+type WebsocketCloseMessage struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
+func (m WebsocketCloseMessage) JSON() []byte {
+	return util.JS(m)
+}
+
+func LoadWebsocketCloseMessage(data []byte) WebsocketCloseMessage {
+	var msg WebsocketCloseMessage
+	util.Must(json.Unmarshal(data, &msg))
+	return msg
+}

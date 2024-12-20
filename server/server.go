@@ -105,12 +105,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return
 			}
-			defer rawConn.Close()
+			defer func() {
+				rawConn.Close()
+				tunnel.WSSessions.Delete(sessionID)
+			}()
 
 			conn := sync.NewWSConn(rawConn)
 
 			if !tunnel.WSSessions.SetNX(sessionID, conn) {
-				log.Info("failed to set websocket session", "session_id", sessionID)
+				log.Info("failed to set websocket session", "tunnel", tunnel.ID, "session_id", sessionID)
 				return
 			}
 
@@ -119,7 +122,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 				mt, data, err := conn.ReadMessage()
 				if err != nil {
-					log.Info("error reading message", "err", err.Error(), "name", tunnel.ID, "session_id", sessionID)
+					log.Info("error reading message, closing websocket", "err", err.Error(), "name", tunnel.ID, "session_id", sessionID)
+					if err := tunnel.Send(
+						types.MessageKindWebsocketClose,
+						types.WebsocketCloseMessage{
+							SessionID: sessionID,
+						}.JSON(),
+						nil,
+					); err != nil {
+						log.Error("failed to send websocket close message", "err", err.Error(), "name", tunnel.ID, "session_id", sessionID)
+					}
 					break
 				}
 
@@ -130,8 +142,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				case websocket.TextMessage:
 					wsMsg = types.NewStringWebsocketMessage(sessionID, string(data))
 				case websocket.CloseMessage:
-					log.Info("closing websocket", "session_id", sessionID)
-					tunnel.WSSessions.Delete(sessionID)
+					log.Info("closing websocket", "tunnel", tunnel.ID, "session_id", sessionID)
+					if err := tunnel.Send(
+						types.MessageKindWebsocketClose,
+						types.WebsocketCloseMessage{
+							SessionID: sessionID,
+						}.JSON(),
+						nil,
+					); err != nil {
+						log.Error("failed to send websocket close message", "err", err.Error(), "tunnel", tunnel.ID, "session_id", sessionID)
+					}
 					return
 				}
 

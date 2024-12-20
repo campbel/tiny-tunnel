@@ -13,6 +13,7 @@ const (
 	MessageKindWebsocketCreateRequest  = "ws_create_request"
 	MessageKindWebsocketCreateResponse = "ws_create_response"
 	MessageKindWebsocketMessage        = "ws_message"
+	MessageKindWebsocketClose          = "ws_close"
 )
 
 type Payload interface {
