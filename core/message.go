@@ -9,6 +9,9 @@ const (
 	MessageKindText = iota
 	MessageKindHttpRequest
 	MessageKindHttpResponse
+	MessageKindWebsocketCreateRequest
+	MessageKindWebsocketCreateResponse
+	MessageKindWebsocketMessage
 )
 
 type Message struct {
@@ -34,7 +37,7 @@ type Payload interface {
 
 type HttpRequestPayload struct {
 	Method  string      `json:"method"`
-	URL     string      `json:"url"`
+	Path    string      `json:"path"`
 	Headers http.Header `json:"headers"`
 	Body    []byte      `json:"body"`
 }
@@ -61,9 +64,8 @@ func (p *HttpResponsePayload) Bytes() []byte {
 }
 
 type WebsocketCreateRequestPayload struct {
-	Origin   string `json:"origin"`
-	Path     string `json:"path"`
-	Protocol string `json:"protocol"`
+	Origin string `json:"origin"`
+	Path   string `json:"path"`
 }
 
 func (p *WebsocketCreateRequestPayload) Bytes() []byte {
@@ -78,6 +80,17 @@ type WebsocketCreateResponsePayload struct {
 }
 
 func (p *WebsocketCreateResponsePayload) Bytes() []byte {
+	json, _ := json.Marshal(p)
+	return json
+}
+
+type WebsocketMessagePayload struct {
+	SessionID string `json:"session_id"`
+	Kind      int    `json:"kind"`
+	Data      []byte `json:"data"`
+}
+
+func (p *WebsocketMessagePayload) Bytes() []byte {
 	json, _ := json.Marshal(p)
 	return json
 }

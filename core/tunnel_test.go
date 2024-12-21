@@ -14,7 +14,7 @@ func TestTunnel(t *testing.T) {
 	assert := assert.New(t)
 	clientTunnel, serverTunnel := createConnectedTunnels(t)
 
-	clientTunnel.SetTextHandler(func(tunnel *Tunnel, payload TextPayload) {
+	clientTunnel.SetTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
 		assert.Equal(payload.Text, "Hello, World!")
 		response := []byte(payload.Text)
 		slices.Reverse(response)
@@ -24,7 +24,7 @@ func TestTunnel(t *testing.T) {
 	})
 
 	responseChan := make(chan string)
-	serverTunnel.SetTextHandler(func(tunnel *Tunnel, payload TextPayload) {
+	serverTunnel.SetTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
 		responseChan <- string(payload.Text)
 	})
 
