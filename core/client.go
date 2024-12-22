@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	gsync "sync"
 
 	"github.com/campbel/tiny-tunnel/log"
 	"github.com/campbel/tiny-tunnel/sync"
@@ -20,8 +21,12 @@ type ClientTunnel struct {
 
 	tunnel     *Tunnel
 	httpClient *http.Client
-	done       <-chan bool
 	wsSessions *sync.Map[string, *sync.WSConn]
+
+	// manage the client tunnel done channel
+	done   <-chan bool
+	waitMu gsync.Mutex
+	isDone bool
 }
 
 func NewClientTunnel(options ClientOptions) *ClientTunnel {
@@ -36,13 +41,17 @@ func NewClientTunnel(options ClientOptions) *ClientTunnel {
 	}
 }
 
-func (c *ClientTunnel) ConnectAndWait(ctx context.Context) error {
-	err := c.Connect(ctx)
-	if err != nil {
-		return err
+// Wait blocks until the client tunnel is done
+func (c *ClientTunnel) Wait() {
+	c.waitMu.Lock()
+	defer c.waitMu.Unlock()
+
+	if c.isDone {
+		return
 	}
+
 	<-c.done
-	return nil
+	c.isDone = true
 }
 
 func (c *ClientTunnel) Connect(ctx context.Context) error {
@@ -52,6 +61,11 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 	}
 
 	c.tunnel = NewTunnel(conn)
+
+	go func() {
+		<-ctx.Done()
+		c.tunnel.Close()
+	}()
 
 	c.tunnel.SetTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
 		fmt.Println("Received text:", payload.Text)
@@ -152,7 +166,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 
 	doneChan := make(chan bool)
 	go func() {
-		c.tunnel.Run()
+		c.tunnel.Run(ctx)
 		doneChan <- true
 	}()
 

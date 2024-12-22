@@ -116,6 +116,8 @@ func TestServerConnectWithClient(t *testing.T) {
 func TestServerTunnel(t *testing.T) {
 	assert := assert.New(t)
 
+	serverCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	serverTunnelChan := make(chan *ServerTunnel)
 	tunnelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upgrader := websocket.Upgrader{
@@ -131,7 +133,7 @@ func TestServerTunnel(t *testing.T) {
 
 		serverTunnel := NewServerTunnel(conn)
 		serverTunnelChan <- serverTunnel
-		serverTunnel.Start()
+		serverTunnel.Start(serverCtx)
 	}))
 	defer tunnelServer.Close()
 
@@ -146,6 +148,8 @@ func TestServerTunnel(t *testing.T) {
 		return
 	}
 
+	clientCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	clientTunnel := NewClientTunnel(ClientOptions{
 		Name:       "test",
 		ServerHost: strings.Split(serverURL.Host, ":")[0],
@@ -154,7 +158,7 @@ func TestServerTunnel(t *testing.T) {
 		Target:     appServer.URL,
 	})
 
-	go clientTunnel.ConnectAndWait(context.Background())
+	assert.NoError(clientTunnel.Connect(clientCtx))
 
 	serverTunnel := <-serverTunnelChan
 

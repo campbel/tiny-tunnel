@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -54,7 +55,7 @@ func createConnectedTunnels(t *testing.T) (*Tunnel, *Tunnel) {
 		defer conn.Close()
 		serverTunnel := NewTunnel(conn)
 		serverTunnelChan <- serverTunnel
-		serverTunnel.Run()
+		serverTunnel.Run(context.Background())
 	}))
 	defer server.Close()
 
@@ -68,7 +69,7 @@ func createConnectedTunnels(t *testing.T) (*Tunnel, *Tunnel) {
 		t.FailNow()
 	}
 	clientTunnel := NewTunnel(conn)
-	go clientTunnel.Run()
+	go clientTunnel.Run(context.Background())
 
 	return clientTunnel, <-serverTunnelChan
 }

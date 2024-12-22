@@ -63,7 +63,9 @@ func TestE2E(t *testing.T) {
 		Target:     appServer.URL,
 	})
 
-	assert.NoError(client.Connect(context.Background()))
+	ctx, cancel := context.WithCancel(context.Background())
+
+	assert.NoError(client.Connect(ctx))
 
 	t.Run("HTTP Request #1", func(t *testing.T) {
 		for range 5 {
@@ -103,4 +105,7 @@ func TestE2E(t *testing.T) {
 			assert.Equal(expected, message)
 		}
 	})
+
+	cancel()
+	client.Wait()
 }

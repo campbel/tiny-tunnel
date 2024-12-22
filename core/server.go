@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -70,7 +71,7 @@ func (s *ServerHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Info("registered tunnel", "name", name)
 
-	tunnel.Start()
+	tunnel.Start(r.Context())
 
 	s.tunnels.Delete(name)
 	log.Info("unregistered tunnel", "name", name)
@@ -124,8 +125,8 @@ func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 	return server
 }
 
-func (s *ServerTunnel) Start() {
-	s.tunnel.Run()
+func (s *ServerTunnel) Start(ctx context.Context) {
+	s.tunnel.Run(ctx)
 }
 
 func (s *ServerTunnel) Stop() {
