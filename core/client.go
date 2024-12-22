@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/campbel/tiny-tunnel/log"
+	"github.com/campbel/tiny-tunnel/sync"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -18,6 +21,7 @@ type ClientTunnel struct {
 	tunnel     *Tunnel
 	httpClient *http.Client
 	done       <-chan bool
+	wsSessions *sync.Map[string, *sync.WSConn]
 }
 
 func NewClientTunnel(options ClientOptions) *ClientTunnel {
@@ -28,6 +32,7 @@ func NewClientTunnel(options ClientOptions) *ClientTunnel {
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: options.Insecure},
 			},
 		},
+		wsSessions: sync.NewMap[string, *sync.WSConn](),
 	}
 }
 
@@ -76,6 +81,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 			tunnel.SendResponse(MessageKindHttpResponse, id, &HttpResponsePayload{Error: err})
 			return
 		}
+		defer resp.Body.Close()
 
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -88,6 +94,60 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 			Headers: resp.Header,
 			Body:    bodyBytes,
 		}})
+	})
+
+	c.tunnel.SetWebsocketCreateRequestHandler(func(tunnel *Tunnel, id string, payload WebsocketCreateRequestPayload) {
+		wsUrl, err := getWebsocketURL(c.options.Target)
+		if err != nil {
+			tunnel.SendResponse(MessageKindWebsocketCreateResponse, id, &WebsocketCreateResponsePayload{Error: err})
+			return
+		}
+
+		rawConn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsUrl.String(), c.options.ServerHeaders)
+		if err != nil {
+			tunnel.SendResponse(MessageKindWebsocketCreateResponse, id, &WebsocketCreateResponsePayload{Error: err})
+			return
+		}
+
+		conn := sync.NewWSConn(rawConn)
+
+		sessionID := uuid.New().String()
+		if ok := c.wsSessions.SetNX(sessionID, conn); !ok {
+			tunnel.SendResponse(MessageKindWebsocketCreateResponse, id, &WebsocketCreateResponsePayload{Error: errors.New("session already exists")})
+			return
+		}
+
+		tunnel.SendResponse(MessageKindWebsocketCreateResponse, id, &WebsocketCreateResponsePayload{
+			SessionID: sessionID,
+			HttpResponse: &HttpResponsePayload{Response: HttpResponse{
+				Status:  resp.StatusCode,
+				Headers: resp.Header,
+			}},
+		})
+
+		go func() {
+			defer conn.Close()
+			for {
+				mt, data, err := conn.ReadMessage()
+				if err != nil {
+					break
+				}
+				if err := tunnel.Send(MessageKindWebsocketMessage, &WebsocketMessagePayload{SessionID: sessionID, Kind: mt, Data: data}); err != nil {
+					log.Error("failed to send websocket message", "error", err.Error())
+				}
+			}
+		}()
+	})
+
+	c.tunnel.SetWebsocketMessageHandler(func(tunnel *Tunnel, id string, payload WebsocketMessagePayload) {
+		conn, ok := c.wsSessions.Get(payload.SessionID)
+		if !ok {
+			log.Error("websocket session not found", "session_id", id)
+			return
+		}
+		if err := conn.WriteMessage(payload.Kind, payload.Data); err != nil {
+			log.Error("failed to write websocket message", "error", err.Error())
+		}
 	})
 
 	doneChan := make(chan bool)

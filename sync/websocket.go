@@ -35,8 +35,6 @@ func (w *WSConn) Conn() *websocket.Conn {
 }
 
 func (w *WSConn) ReadMessage() (int, []byte, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	return w.conn.ReadMessage()
 }
 

@@ -34,7 +34,6 @@ func NewServerHandler(options ServerOptions) http.Handler {
 	}
 
 	router := mux.NewRouter()
-	router.Headers("X-TT-Tunnel", "{[a-z]+}").HandlerFunc(server.HandleTunnelRequest)
 	router.Host(fmt.Sprintf("{tunnel:[a-z]+}.%s", options.Hostname)).HandlerFunc(server.HandleTunnelRequest)
 	router.HandleFunc("/register", server.HandleRegister)
 	router.HandleFunc("/", server.HandleRoot)
@@ -43,6 +42,11 @@ func NewServerHandler(options ServerOptions) http.Handler {
 }
 
 func (s *ServerHandler) HandleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-TT-Tunnel") != "" {
+		s.HandleTunnelRequest(w, r)
+		return
+	}
+
 	fmt.Fprint(w, "Welcome to Tiny Tunnel. See github.com/campbel/tiny-tunnel for more info.")
 }
 
@@ -76,10 +80,11 @@ func (s *ServerHandler) HandleTunnelRequest(w http.ResponseWriter, r *http.Reque
 	tunnelID := mux.Vars(r)["tunnel"]
 	if tunnelID == "" {
 		tunnelID = r.Header.Get("X-TT-Tunnel")
-		if tunnelID == "" {
-			http.Error(w, "tunnel name not provided", http.StatusBadRequest)
-			return
-		}
+	}
+
+	if tunnelID == "" {
+		http.Error(w, "tunnel name not provided", http.StatusBadRequest)
+		return
 	}
 
 	tunnel, ok := s.tunnels.Get(tunnelID)
@@ -96,17 +101,17 @@ func (s *ServerHandler) HandleTunnelRequest(w http.ResponseWriter, r *http.Reque
 
 type ServerTunnel struct {
 	tunnel         *Tunnel
-	websocketConns map[string]*sync.WSConn
+	websocketConns *sync.Map[string, *sync.WSConn]
 }
 
 func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 	server := &ServerTunnel{
 		tunnel:         NewTunnel(conn),
-		websocketConns: make(map[string]*sync.WSConn),
+		websocketConns: sync.NewMap[string, *sync.WSConn](),
 	}
 
 	server.tunnel.SetWebsocketMessageHandler(func(tunnel *Tunnel, id string, payload WebsocketMessagePayload) {
-		conn, ok := server.websocketConns[payload.SessionID]
+		conn, ok := server.websocketConns.Get(payload.SessionID)
 		if !ok {
 			return
 		}
@@ -206,9 +211,13 @@ func (s *ServerTunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	s.websocketConns[responsePayload.SessionID] = conn
+	if !s.websocketConns.SetNX(responsePayload.SessionID, conn) {
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
 	defer func() {
-		delete(s.websocketConns, responsePayload.SessionID)
+		s.websocketConns.Delete(responsePayload.SessionID)
+		conn.Close()
 	}()
 
 	for {
@@ -217,9 +226,13 @@ func (s *ServerTunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Req
 			break
 		}
 
-		s.tunnel.Send(MessageKindWebsocketMessage, &WebsocketMessagePayload{
-			Kind: messageType,
-			Data: message,
-		})
+		if err := s.tunnel.Send(MessageKindWebsocketMessage, &WebsocketMessagePayload{
+			SessionID: responsePayload.SessionID,
+			Kind:      messageType,
+			Data:      message,
+		}); err != nil {
+			log.Error("failed to send websocket message", "error", err.Error())
+			continue
+		}
 	}
 }
