@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	gsync "sync"
+	"time"
 
 	"github.com/campbel/tiny-tunnel/log"
 	"github.com/campbel/tiny-tunnel/sync"
@@ -12,6 +13,10 @@ import (
 
 type Tunnel struct {
 	conn *sync.WSConn
+
+	// closure
+	isClosed     bool
+	closeHandler func()
 
 	// responseChannels is a map of message IDs to channels that want to receive the response
 	responseChannels map[string][]chan Message
@@ -27,8 +32,23 @@ func NewTunnel(conn *websocket.Conn) *Tunnel {
 	return &Tunnel{conn: sync.NewWSConn(conn), responseChannels: make(map[string][]chan Message)}
 }
 
-func (t *Tunnel) Close() error {
-	return t.conn.Close()
+func (t *Tunnel) Close() {
+	t.close(false)
+}
+
+func (t *Tunnel) SetCloseHandler(handler func()) {
+	t.closeHandler = handler
+}
+
+func (t *Tunnel) close(peerSent bool) {
+	if !peerSent {
+		t.conn.Conn().WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second))
+	}
+	t.isClosed = true
+	t.conn.Close()
+	if t.closeHandler != nil {
+		t.closeHandler()
+	}
 }
 
 func (t *Tunnel) Send(kind int, message Payload, reChan ...chan Message) error {
@@ -54,13 +74,22 @@ func (t *Tunnel) SendResponse(kind int, id string, message Payload) error {
 }
 
 func (t *Tunnel) Run() {
-	defer t.Close()
 	for {
 		var msg Message
 		err := t.conn.ReadJSON(&msg)
 		if err != nil {
-			log.Error("failed to read message", "error", err.Error())
-			return
+			// if err is websocket.CloseError, we need to close the tunnel
+			switch v := err.(type) {
+			case *websocket.CloseError:
+				if v.Code != websocket.CloseNormalClosure {
+					log.Error("receive non-normal closure", "code", v.Code, "text", v.Text)
+				}
+				t.close(true)
+				return
+			default:
+				t.close(false)
+				return
+			}
 		}
 
 		// If a message contains a RE, it is a response to a previous message

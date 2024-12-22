@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 )
@@ -70,4 +71,51 @@ func createConnectedTunnels(t *testing.T) (*Tunnel, *Tunnel) {
 	go clientTunnel.Run()
 
 	return clientTunnel, <-serverTunnelChan
+}
+
+func TestTunnelClose(t *testing.T) {
+	assert := assert.New(t)
+
+	randomString := uuid.New().String()
+
+	clientTunnel, serverTunnel := createConnectedTunnels(t)
+
+	clientTunnel.SetTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+		tunnel.Send(MessageKindText, &TextPayload{
+			Text: payload.Text,
+		})
+	})
+
+	serverCloseChan := make(chan bool)
+	serverTunnel.SetCloseHandler(func() {
+		go func() {
+			serverCloseChan <- true
+		}()
+	})
+
+	clientCloseChan := make(chan bool)
+	clientTunnel.SetCloseHandler(func() {
+		go func() {
+			clientCloseChan <- true
+		}()
+	})
+
+	responseChan := make(chan string)
+	serverTunnel.SetTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+		responseChan <- string(payload.Text)
+	})
+
+	serverTunnel.Send(MessageKindText, &TextPayload{
+		Text: randomString,
+	})
+
+	assert.Equal(randomString, <-responseChan)
+
+	clientTunnel.Close()
+
+	<-clientCloseChan
+	<-serverCloseChan
+
+	assert.True(clientTunnel.isClosed, "client tunnel should be closed")
+	assert.True(serverTunnel.isClosed, "server tunnel should be closed")
 }

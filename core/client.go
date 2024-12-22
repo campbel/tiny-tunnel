@@ -17,6 +17,7 @@ type ClientTunnel struct {
 
 	tunnel     *Tunnel
 	httpClient *http.Client
+	done       <-chan bool
 }
 
 func NewClientTunnel(options ClientOptions) *ClientTunnel {
@@ -28,6 +29,15 @@ func NewClientTunnel(options ClientOptions) *ClientTunnel {
 			},
 		},
 	}
+}
+
+func (c *ClientTunnel) ConnectAndWait(ctx context.Context) error {
+	err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	<-c.done
+	return nil
 }
 
 func (c *ClientTunnel) Connect(ctx context.Context) error {
@@ -80,7 +90,13 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 		}})
 	})
 
-	c.tunnel.Run()
+	doneChan := make(chan bool)
+	go func() {
+		c.tunnel.Run()
+		doneChan <- true
+	}()
+
+	c.done = doneChan
 
 	return nil
 }

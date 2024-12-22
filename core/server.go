@@ -2,13 +2,97 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/campbel/tiny-tunnel/log"
 	"github.com/campbel/tiny-tunnel/sync"
+	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
+
+///
+/// Server Handler
+///
+
+type ServerHandler struct {
+	options  ServerOptions
+	upgrader websocket.Upgrader
+	tunnels  *sync.Map[string, *ServerTunnel]
+}
+
+func NewServerHandler(options ServerOptions) http.Handler {
+	server := &ServerHandler{
+		options: options,
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				return true
+			},
+		},
+		tunnels: sync.NewMap[string, *ServerTunnel](),
+	}
+
+	router := mux.NewRouter()
+	router.Headers("X-TT-Tunnel", "{[a-z]+}").HandlerFunc(server.HandleTunnelRequest)
+	router.Host(fmt.Sprintf("{tunnel:[a-z]+}.%s", options.Hostname)).HandlerFunc(server.HandleTunnelRequest)
+	router.HandleFunc("/register", server.HandleRegister)
+	router.HandleFunc("/", server.HandleRoot)
+
+	return router
+}
+
+func (s *ServerHandler) HandleRoot(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprint(w, "Welcome to Tiny Tunnel. See github.com/campbel/tiny-tunnel for more info.")
+}
+
+func (s *ServerHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
+	name := r.FormValue("name")
+	if name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	tunnel := NewServerTunnel(conn)
+	if !s.tunnels.SetNX(name, tunnel) {
+		http.Error(w, "name is already used", http.StatusBadRequest)
+		return
+	}
+	log.Info("registered tunnel", "name", name)
+
+	tunnel.Start()
+
+	s.tunnels.Delete(name)
+	log.Info("unregistered tunnel", "name", name)
+}
+
+func (s *ServerHandler) HandleTunnelRequest(w http.ResponseWriter, r *http.Request) {
+	tunnelID := mux.Vars(r)["tunnel"]
+	if tunnelID == "" {
+		tunnelID = r.Header.Get("X-TT-Tunnel")
+		if tunnelID == "" {
+			http.Error(w, "tunnel name not provided", http.StatusBadRequest)
+			return
+		}
+	}
+
+	tunnel, ok := s.tunnels.Get(tunnelID)
+	if !ok {
+		http.Error(w, "tunnel not found", http.StatusNotFound)
+		return
+	}
+	tunnel.HandleHttpRequest(w, r)
+}
+
+///
+/// Server Tunnel
+///
 
 type ServerTunnel struct {
 	tunnel         *Tunnel
@@ -35,8 +119,12 @@ func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 	return server
 }
 
-func (s *ServerTunnel) Connect() {
+func (s *ServerTunnel) Start() {
 	s.tunnel.Run()
+}
+
+func (s *ServerTunnel) Stop() {
+	s.tunnel.Close()
 }
 
 func (s *ServerTunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
