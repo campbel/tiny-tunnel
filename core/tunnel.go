@@ -18,6 +18,7 @@ type Tunnel struct {
 	// closure
 	isClosed     bool
 	closeHandler func()
+	closeChan    chan struct{}
 	closeMu      gsync.Mutex
 
 	// responseChannels is a map of message IDs to channels that want to receive the response
@@ -31,7 +32,11 @@ type Tunnel struct {
 }
 
 func NewTunnel(conn *websocket.Conn) *Tunnel {
-	return &Tunnel{conn: sync.NewWSConn(conn), responseChannels: make(map[string][]chan Message)}
+	return &Tunnel{
+		conn:             sync.NewWSConn(conn),
+		responseChannels: make(map[string][]chan Message),
+		closeChan:        make(chan struct{}),
+	}
 }
 
 func (t *Tunnel) Close() {
@@ -54,6 +59,7 @@ func (t *Tunnel) close(peerSent bool) {
 		t.conn.Conn().WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second))
 	}
 	t.isClosed = true
+	close(t.closeChan)
 	t.conn.Close()
 	if t.closeHandler != nil {
 		t.closeHandler()
@@ -82,10 +88,14 @@ func (t *Tunnel) SendResponse(kind int, id string, message Payload) error {
 	return t.conn.WriteJSON(msg)
 }
 
-func (t *Tunnel) Run(ctx context.Context) {
+func (t *Tunnel) StartReadLoop(ctx context.Context) {
 	go func() {
-		<-ctx.Done()
-		t.close(false)
+		select {
+		case <-ctx.Done():
+			t.close(false)
+		case <-t.closeChan:
+			return
+		}
 	}()
 
 	for {

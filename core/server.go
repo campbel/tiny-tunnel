@@ -126,7 +126,7 @@ func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 }
 
 func (s *ServerTunnel) Start(ctx context.Context) {
-	s.tunnel.Run(ctx)
+	s.tunnel.StartReadLoop(ctx)
 }
 
 func (s *ServerTunnel) Stop() {

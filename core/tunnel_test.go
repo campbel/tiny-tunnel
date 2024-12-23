@@ -55,7 +55,7 @@ func createConnectedTunnels(t *testing.T) (*Tunnel, *Tunnel) {
 		defer conn.Close()
 		serverTunnel := NewTunnel(conn)
 		serverTunnelChan <- serverTunnel
-		serverTunnel.Run(context.Background())
+		serverTunnel.StartReadLoop(context.Background())
 	}))
 	defer server.Close()
 
@@ -69,7 +69,7 @@ func createConnectedTunnels(t *testing.T) (*Tunnel, *Tunnel) {
 		t.FailNow()
 	}
 	clientTunnel := NewTunnel(conn)
-	go clientTunnel.Run(context.Background())
+	go clientTunnel.StartReadLoop(context.Background())
 
 	return clientTunnel, <-serverTunnelChan
 }

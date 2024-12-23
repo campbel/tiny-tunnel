@@ -4,7 +4,9 @@ Copyright © 2024 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
-	"github.com/campbel/tiny-tunnel/client"
+	"net/http"
+
+	"github.com/campbel/tiny-tunnel/core"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +28,9 @@ var startCmd = &cobra.Command{
 	Short: "",
 	Long:  ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return client.ConnectAndHandle(cmd.Context(), client.ConnectOptions{
+		ctx := cmd.Context()
+
+		clientTunnel := core.NewClientTunnel(core.ClientOptions{
 			Target:            target,
 			Name:              name,
 			ServerHost:        serverHost,
@@ -34,9 +38,17 @@ var startCmd = &cobra.Command{
 			Insecure:          insecure,
 			AllowedIPs:        allowedIPs,
 			ReconnectAttempts: reconnectAttempts,
-			TargetHeaders:     targetHeaders,
-			ServerHeaders:     serverHeaders,
+			TargetHeaders:     convertMapToHeaders(targetHeaders),
+			ServerHeaders:     convertMapToHeaders(serverHeaders),
 		})
+
+		if err := clientTunnel.Connect(ctx); err != nil {
+			return err
+		}
+
+		clientTunnel.Wait()
+
+		return nil
 	},
 }
 
@@ -51,4 +63,12 @@ func init() {
 	startCmd.Flags().IntVarP(&reconnectAttempts, "reconnect-attempts", "r", 5, "Reconnect attempts")
 	startCmd.Flags().StringToStringVarP(&targetHeaders, "target-headers", "T", map[string]string{}, "Target headers")
 	startCmd.Flags().StringToStringVarP(&serverHeaders, "server-headers", "S", map[string]string{}, "Server headers")
+}
+
+func convertMapToHeaders(m map[string]string) http.Header {
+	headers := http.Header{}
+	for k, v := range m {
+		headers.Add(k, v)
+	}
+	return headers
 }

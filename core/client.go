@@ -111,13 +111,14 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 	})
 
 	c.tunnel.SetWebsocketCreateRequestHandler(func(tunnel *Tunnel, id string, payload WebsocketCreateRequestPayload) {
+		log.Info("websocket create request", "payload", payload)
 		wsUrl, err := getWebsocketURL(c.options.Target)
 		if err != nil {
 			tunnel.SendResponse(MessageKindWebsocketCreateResponse, id, &WebsocketCreateResponsePayload{Error: err})
 			return
 		}
 
-		rawConn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsUrl.String(), c.options.ServerHeaders)
+		rawConn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsUrl.String()+payload.Path, http.Header{"Origin": []string{payload.Origin}})
 		if err != nil {
 			tunnel.SendResponse(MessageKindWebsocketCreateResponse, id, &WebsocketCreateResponsePayload{Error: err})
 			return
@@ -140,12 +141,15 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 		})
 
 		go func() {
+			log.Info("starting websocket read loop", "session_id", sessionID)
 			defer conn.Close()
 			for {
 				mt, data, err := conn.ReadMessage()
 				if err != nil {
+					log.Error("exiting websocket read loop", "error", err.Error(), "session_id", sessionID)
 					break
 				}
+				log.Info("read ws message", "session_id", sessionID, "kind", mt, "data", data)
 				if err := tunnel.Send(MessageKindWebsocketMessage, &WebsocketMessagePayload{SessionID: sessionID, Kind: mt, Data: data}); err != nil {
 					log.Error("failed to send websocket message", "error", err.Error())
 				}
@@ -166,7 +170,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 
 	doneChan := make(chan bool)
 	go func() {
-		c.tunnel.Run(ctx)
+		c.tunnel.StartReadLoop(ctx)
 		doneChan <- true
 	}()
 
