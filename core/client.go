@@ -149,7 +149,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 					log.Error("exiting websocket read loop", "error", err.Error(), "session_id", sessionID)
 					break
 				}
-				log.Info("read ws message", "session_id", sessionID, "kind", mt, "data", data)
+				log.Debug("read ws message", "session_id", sessionID, "kind", mt, "data", string(data))
 				if err := tunnel.Send(MessageKindWebsocketMessage, &WebsocketMessagePayload{SessionID: sessionID, Kind: mt, Data: data}); err != nil {
 					log.Error("failed to send websocket message", "error", err.Error())
 				}
