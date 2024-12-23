@@ -142,7 +142,12 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 
 		go func() {
 			log.Info("starting websocket read loop", "session_id", sessionID)
-			defer conn.Close()
+			defer func() {
+				log.Info("closing websocket connection", "session_id", sessionID)
+				conn.Close()
+				c.wsSessions.Delete(sessionID)
+			}()
+
 			for {
 				mt, data, err := conn.ReadMessage()
 				if err != nil {
