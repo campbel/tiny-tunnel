@@ -116,54 +116,58 @@ func (t *Tunnel) StartReadLoop(ctx context.Context) {
 			}
 		}
 
-		// If a message contains a RE, it is a response to a previous message
-		// We need to send it to the channel(s) waiting for the response
-		if msg.RE != "" {
-			if reChans, ok := t.responseChannels[msg.RE]; ok {
-				var wg gsync.WaitGroup
-				for _, reChan := range reChans {
-					wg.Add(1)
-					go func(reChan chan Message) {
-						defer wg.Done()
-						reChan <- msg
-					}(reChan)
-				}
-				wg.Wait()
-				delete(t.responseChannels, msg.RE)
-			}
-			continue
-		}
+		// Handle the message
+		go func(msg Message) {
 
-		switch msg.Kind {
-		case MessageKindText:
-			var payload TextPayload
-			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-				log.Error("failed to unmarshal text payload", "error", err.Error())
-				continue
+			// If a message contains a RE, it is a response to a previous message
+			// We need to send it to the channel(s) waiting for the response
+			if msg.RE != "" {
+				if reChans, ok := t.responseChannels[msg.RE]; ok {
+					var wg gsync.WaitGroup
+					for _, reChan := range reChans {
+						wg.Add(1)
+						go func(reChan chan Message) {
+							defer wg.Done()
+							reChan <- msg
+						}(reChan)
+					}
+					wg.Wait()
+					delete(t.responseChannels, msg.RE)
+				}
+				return
 			}
-			t.textHandler(t, msg.ID, payload)
-		case MessageKindHttpRequest:
-			var payload HttpRequestPayload
-			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-				log.Error("failed to unmarshal HTTP request payload", "error", err.Error())
-				continue
+
+			switch msg.Kind {
+			case MessageKindText:
+				var payload TextPayload
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					log.Error("failed to unmarshal text payload", "error", err.Error())
+					return
+				}
+				t.textHandler(t, msg.ID, payload)
+			case MessageKindHttpRequest:
+				var payload HttpRequestPayload
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					log.Error("failed to unmarshal HTTP request payload", "error", err.Error())
+					return
+				}
+				t.httpRequestHandler(t, msg.ID, payload)
+			case MessageKindWebsocketCreateRequest:
+				var payload WebsocketCreateRequestPayload
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					log.Error("failed to unmarshal websocket create request payload", "error", err.Error())
+					return
+				}
+				t.websocketCreateRequestHandler(t, msg.ID, payload)
+			case MessageKindWebsocketMessage:
+				var payload WebsocketMessagePayload
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					log.Error("failed to unmarshal websocket message payload", "error", err.Error())
+					return
+				}
+				t.websocketMessageHandler(t, msg.ID, payload)
 			}
-			t.httpRequestHandler(t, msg.ID, payload)
-		case MessageKindWebsocketCreateRequest:
-			var payload WebsocketCreateRequestPayload
-			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-				log.Error("failed to unmarshal websocket create request payload", "error", err.Error())
-				continue
-			}
-			t.websocketCreateRequestHandler(t, msg.ID, payload)
-		case MessageKindWebsocketMessage:
-			var payload WebsocketMessagePayload
-			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-				log.Error("failed to unmarshal websocket message payload", "error", err.Error())
-				continue
-			}
-			t.websocketMessageHandler(t, msg.ID, payload)
-		}
+		}(msg)
 	}
 }
 
