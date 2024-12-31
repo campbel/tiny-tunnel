@@ -14,9 +14,8 @@ import (
 )
 
 var (
-	port        string
-	hostname    string
-	letsEncrypt bool
+	port     string
+	hostname string
 )
 
 // serveCmd represents the serve command
