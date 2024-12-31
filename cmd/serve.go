@@ -47,7 +47,15 @@ var serveCmd = &cobra.Command{
 		<-ctx.Done()
 		log.Info("shutting down server")
 		shutdownCtx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-		return server.Shutdown(shutdownCtx)
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			if err == http.ErrServerClosed {
+				log.Info("server closed")
+			} else {
+				log.Error("error shutting down server", "err", err)
+			}
+		}
+
+		return nil
 	},
 }
 

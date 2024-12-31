@@ -12,6 +12,7 @@ const (
 	MessageKindWebsocketCreateRequest
 	MessageKindWebsocketCreateResponse
 	MessageKindWebsocketMessage
+	MessageKindWebsocketClose
 )
 
 type Message struct {
@@ -91,6 +92,15 @@ type WebsocketMessagePayload struct {
 }
 
 func (p *WebsocketMessagePayload) Bytes() []byte {
+	json, _ := json.Marshal(p)
+	return json
+}
+
+type WebsocketClosePayload struct {
+	SessionID string `json:"session_id"`
+}
+
+func (p *WebsocketClosePayload) Bytes() []byte {
 	json, _ := json.Marshal(p)
 	return json
 }

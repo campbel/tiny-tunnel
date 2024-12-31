@@ -112,6 +112,7 @@ func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 	}
 
 	server.tunnel.SetWebsocketMessageHandler(func(tunnel *Tunnel, id string, payload WebsocketMessagePayload) {
+		log.Debug("handling websocket message", "payload", payload)
 		conn, ok := server.websocketConns.Get(payload.SessionID)
 		if !ok {
 			return
@@ -120,6 +121,18 @@ func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 		if err != nil {
 			log.Error("failed to write websocket message", "error", err.Error())
 		}
+	})
+
+	server.tunnel.SetWebsocketCloseHandler(func(tunnel *Tunnel, id string, payload WebsocketClosePayload) {
+		log.Debug("handling websocket close", "payload", payload)
+		conn, ok := server.websocketConns.Get(payload.SessionID)
+		if !ok {
+			return
+		}
+		if err := conn.Close(); err != nil {
+			log.Error("failed to close websocket connection", "error", err.Error(), "payload", payload)
+		}
+		server.websocketConns.Delete(payload.SessionID)
 	})
 
 	return server
@@ -224,7 +237,13 @@ func (s *ServerTunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Req
 	for {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
-			break
+			log.Debug("app websocket connection closed", "sessionID", responsePayload.SessionID, "error", err.Error())
+			if err := s.tunnel.Send(MessageKindWebsocketClose, &WebsocketClosePayload{
+				SessionID: responsePayload.SessionID,
+			}); err != nil {
+				log.Error("failed to send websocket close", "error", err.Error())
+			}
+			return
 		}
 
 		if err := s.tunnel.Send(MessageKindWebsocketMessage, &WebsocketMessagePayload{
@@ -232,6 +251,11 @@ func (s *ServerTunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Req
 			Kind:      messageType,
 			Data:      message,
 		}); err != nil {
+			if err == websocket.ErrCloseSent {
+				conn.Close()
+				log.Debug("tunnel websocket connection closed", "sessionID", responsePayload.SessionID, "error", err.Error())
+				return
+			}
 			log.Error("failed to send websocket message", "error", err.Error())
 			continue
 		}

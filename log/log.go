@@ -22,17 +22,21 @@ func init() {
 }
 
 func Debug(message string, args ...any) {
+	logger.Helper()
 	logger.Debug(message, args...)
 }
 
 func Info(message string, args ...any) {
+	logger.Helper()
 	logger.Info(message, args...)
 }
 
 func Warn(message string, args ...any) {
+	logger.Helper()
 	logger.Warn(message, args...)
 }
 
 func Error(message string, args ...any) {
+	logger.Helper()
 	logger.Error(message, args...)
 }

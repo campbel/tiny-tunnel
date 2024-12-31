@@ -29,6 +29,7 @@ type Tunnel struct {
 	httpRequestHandler            func(tunnel *Tunnel, id string, payload HttpRequestPayload)
 	websocketCreateRequestHandler func(tunnel *Tunnel, id string, payload WebsocketCreateRequestPayload)
 	websocketMessageHandler       func(tunnel *Tunnel, id string, payload WebsocketMessagePayload)
+	websocketCloseHandler         func(tunnel *Tunnel, id string, payload WebsocketClosePayload)
 }
 
 func NewTunnel(conn *websocket.Conn) *Tunnel {
@@ -166,6 +167,13 @@ func (t *Tunnel) StartReadLoop(ctx context.Context) {
 					return
 				}
 				t.websocketMessageHandler(t, msg.ID, payload)
+			case MessageKindWebsocketClose:
+				var payload WebsocketClosePayload
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					log.Error("failed to unmarshal websocket close payload", "error", err.Error())
+					return
+				}
+				t.websocketCloseHandler(t, msg.ID, payload)
 			}
 		}(msg)
 	}
@@ -185,4 +193,8 @@ func (t *Tunnel) SetWebsocketCreateRequestHandler(handler func(tunnel *Tunnel, i
 
 func (t *Tunnel) SetWebsocketMessageHandler(handler func(tunnel *Tunnel, id string, payload WebsocketMessagePayload)) {
 	t.websocketMessageHandler = handler
+}
+
+func (t *Tunnel) SetWebsocketCloseHandler(handler func(tunnel *Tunnel, id string, payload WebsocketClosePayload)) {
+	t.websocketCloseHandler = handler
 }

@@ -68,10 +68,12 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 	}()
 
 	c.tunnel.SetTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+		log.Debug("handling text", "payload", payload)
 		fmt.Println("Received text:", payload.Text)
 	})
 
 	c.tunnel.SetHttpRequestHandler(func(tunnel *Tunnel, id string, payload HttpRequestPayload) {
+		log.Debug("handling http request", "payload", payload)
 		var body *bytes.Reader
 		if payload.Body != nil {
 			body = bytes.NewReader(payload.Body)
@@ -111,7 +113,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 	})
 
 	c.tunnel.SetWebsocketCreateRequestHandler(func(tunnel *Tunnel, id string, payload WebsocketCreateRequestPayload) {
-		log.Info("websocket create request", "payload", payload)
+		log.Debug("handling websocket create request", "payload", payload)
 		wsUrl, err := getWebsocketURL(c.options.Target)
 		if err != nil {
 			tunnel.SendResponse(MessageKindWebsocketCreateResponse, id, &WebsocketCreateResponsePayload{Error: err})
@@ -163,6 +165,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 	})
 
 	c.tunnel.SetWebsocketMessageHandler(func(tunnel *Tunnel, id string, payload WebsocketMessagePayload) {
+		log.Debug("handling websocket message", "payload", payload)
 		conn, ok := c.wsSessions.Get(payload.SessionID)
 		if !ok {
 			log.Error("websocket session not found", "session_id", id)
@@ -171,6 +174,19 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 		if err := conn.WriteMessage(payload.Kind, payload.Data); err != nil {
 			log.Error("failed to write websocket message", "error", err.Error())
 		}
+	})
+
+	c.tunnel.SetWebsocketCloseHandler(func(tunnel *Tunnel, id string, payload WebsocketClosePayload) {
+		log.Debug("handling websocket close", "payload", payload)
+		conn, ok := c.wsSessions.Get(payload.SessionID)
+		if !ok {
+			log.Error("websocket session not found", "session_id", id)
+			return
+		}
+		if err := conn.Close(); err != nil {
+			log.Error("failed to close websocket connection", "error", err.Error(), "payload", payload)
+		}
+		c.wsSessions.Delete(payload.SessionID)
 	})
 
 	doneChan := make(chan bool)
