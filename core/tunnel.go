@@ -6,8 +6,8 @@ import (
 	gsync "sync"
 	"time"
 
-	"github.com/campbel/tiny-tunnel/log"
-	"github.com/campbel/tiny-tunnel/sync"
+	"github.com/campbel/tiny-tunnel/internal/log"
+	"github.com/campbel/tiny-tunnel/internal/sync"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -25,11 +25,7 @@ type Tunnel struct {
 	responseChannels map[string][]chan Message
 
 	// Handlers
-	textHandler                   func(tunnel *Tunnel, id string, payload TextPayload)
-	httpRequestHandler            func(tunnel *Tunnel, id string, payload HttpRequestPayload)
-	websocketCreateRequestHandler func(tunnel *Tunnel, id string, payload WebsocketCreateRequestPayload)
-	websocketMessageHandler       func(tunnel *Tunnel, id string, payload WebsocketMessagePayload)
-	websocketCloseHandler         func(tunnel *Tunnel, id string, payload WebsocketClosePayload)
+	handlerRegistry map[int]func(tunnel *Tunnel, id string, payload []byte)
 }
 
 func NewTunnel(conn *websocket.Conn) *Tunnel {
@@ -37,6 +33,7 @@ func NewTunnel(conn *websocket.Conn) *Tunnel {
 		conn:             sync.NewWSConn(conn),
 		responseChannels: make(map[string][]chan Message),
 		closeChan:        make(chan struct{}),
+		handlerRegistry:  make(map[int]func(tunnel *Tunnel, id string, payload []byte)),
 	}
 }
 
@@ -67,11 +64,16 @@ func (t *Tunnel) close(peerSent bool) {
 	}
 }
 
-func (t *Tunnel) Send(kind int, message Payload, reChan ...chan Message) error {
+func (t *Tunnel) Send(kind int, message any, reChan ...chan Message) error {
+	data, err := json.Marshal(message)
+	if err != nil {
+		return err
+	}
+
 	msg := Message{
 		ID:      uuid.New().String(),
 		Kind:    kind,
-		Payload: message.Bytes(),
+		Payload: data,
 	}
 	if len(reChan) > 0 {
 		t.responseChannels[msg.ID] = reChan
@@ -79,17 +81,22 @@ func (t *Tunnel) Send(kind int, message Payload, reChan ...chan Message) error {
 	return t.conn.WriteJSON(msg)
 }
 
-func (t *Tunnel) SendResponse(kind int, id string, message Payload) error {
+func (t *Tunnel) SendResponse(kind int, id string, message any) error {
+	data, err := json.Marshal(message)
+	if err != nil {
+		return err
+	}
+
 	msg := Message{
 		ID:      uuid.New().String(),
 		RE:      id,
 		Kind:    kind,
-		Payload: message.Bytes(),
+		Payload: data,
 	}
 	return t.conn.WriteJSON(msg)
 }
 
-func (t *Tunnel) StartReadLoop(ctx context.Context) {
+func (t *Tunnel) Listen(ctx context.Context) {
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -138,63 +145,46 @@ func (t *Tunnel) StartReadLoop(ctx context.Context) {
 				return
 			}
 
-			switch msg.Kind {
-			case MessageKindText:
-				var payload TextPayload
-				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-					log.Error("failed to unmarshal text payload", "error", err.Error())
-					return
-				}
-				t.textHandler(t, msg.ID, payload)
-			case MessageKindHttpRequest:
-				var payload HttpRequestPayload
-				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-					log.Error("failed to unmarshal HTTP request payload", "error", err.Error())
-					return
-				}
-				t.httpRequestHandler(t, msg.ID, payload)
-			case MessageKindWebsocketCreateRequest:
-				var payload WebsocketCreateRequestPayload
-				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-					log.Error("failed to unmarshal websocket create request payload", "error", err.Error())
-					return
-				}
-				t.websocketCreateRequestHandler(t, msg.ID, payload)
-			case MessageKindWebsocketMessage:
-				var payload WebsocketMessagePayload
-				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-					log.Error("failed to unmarshal websocket message payload", "error", err.Error())
-					return
-				}
-				t.websocketMessageHandler(t, msg.ID, payload)
-			case MessageKindWebsocketClose:
-				var payload WebsocketClosePayload
-				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-					log.Error("failed to unmarshal websocket close payload", "error", err.Error())
-					return
-				}
-				t.websocketCloseHandler(t, msg.ID, payload)
+			if handler, ok := t.handlerRegistry[msg.Kind]; ok {
+				handler(t, msg.ID, msg.Payload)
+			} else {
+				log.Error("no handler registered for message kind", "kind", msg.Kind)
 			}
 		}(msg)
 	}
 }
 
-func (t *Tunnel) SetTextHandler(handler func(tunnel *Tunnel, id string, payload TextPayload)) {
-	t.textHandler = handler
+func (t *Tunnel) registerHandler(kind int, handler func(tunnel *Tunnel, id string, payload []byte)) {
+	t.handlerRegistry[kind] = handler
 }
 
-func (t *Tunnel) SetHttpRequestHandler(handler func(tunnel *Tunnel, id string, payload HttpRequestPayload)) {
-	t.httpRequestHandler = handler
+func HandlerFunc[T any](handler func(tunnel *Tunnel, id string, payload T)) func(tunnel *Tunnel, id string, payload []byte) {
+	return func(tunnel *Tunnel, id string, payload []byte) {
+		var tPayload T
+		if err := json.Unmarshal(payload, &tPayload); err != nil {
+			log.Error("failed to unmarshal payload", "error", err.Error())
+			return
+		}
+		handler(tunnel, id, tPayload)
+	}
 }
 
-func (t *Tunnel) SetWebsocketCreateRequestHandler(handler func(tunnel *Tunnel, id string, payload WebsocketCreateRequestPayload)) {
-	t.websocketCreateRequestHandler = handler
+func (t *Tunnel) RegisterTextHandler(handler func(tunnel *Tunnel, id string, payload TextPayload)) {
+	t.registerHandler(MessageKindText, HandlerFunc(handler))
 }
 
-func (t *Tunnel) SetWebsocketMessageHandler(handler func(tunnel *Tunnel, id string, payload WebsocketMessagePayload)) {
-	t.websocketMessageHandler = handler
+func (t *Tunnel) RegisterHttpRequestHandler(handler func(tunnel *Tunnel, id string, payload HttpRequestPayload)) {
+	t.registerHandler(MessageKindHttpRequest, HandlerFunc(handler))
 }
 
-func (t *Tunnel) SetWebsocketCloseHandler(handler func(tunnel *Tunnel, id string, payload WebsocketClosePayload)) {
-	t.websocketCloseHandler = handler
+func (t *Tunnel) RegisterWebsocketCreateRequestHandler(handler func(tunnel *Tunnel, id string, payload WebsocketCreateRequestPayload)) {
+	t.registerHandler(MessageKindWebsocketCreateRequest, HandlerFunc(handler))
+}
+
+func (t *Tunnel) RegisterWebsocketMessageHandler(handler func(tunnel *Tunnel, id string, payload WebsocketMessagePayload)) {
+	t.registerHandler(MessageKindWebsocketMessage, HandlerFunc(handler))
+}
+
+func (t *Tunnel) RegisterWebsocketCloseHandler(handler func(tunnel *Tunnel, id string, payload WebsocketClosePayload)) {
+	t.registerHandler(MessageKindWebsocketClose, HandlerFunc(handler))
 }

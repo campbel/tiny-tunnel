@@ -16,7 +16,7 @@ func TestTunnel(t *testing.T) {
 	assert := assert.New(t)
 	clientTunnel, serverTunnel := createConnectedTunnels(t)
 
-	clientTunnel.SetTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+	clientTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
 		assert.Equal(payload.Text, "Hello, World!")
 		response := []byte(payload.Text)
 		slices.Reverse(response)
@@ -26,7 +26,7 @@ func TestTunnel(t *testing.T) {
 	})
 
 	responseChan := make(chan string)
-	serverTunnel.SetTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+	serverTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
 		responseChan <- string(payload.Text)
 	})
 
@@ -55,7 +55,7 @@ func createConnectedTunnels(t *testing.T) (*Tunnel, *Tunnel) {
 		defer conn.Close()
 		serverTunnel := NewTunnel(conn)
 		serverTunnelChan <- serverTunnel
-		serverTunnel.StartReadLoop(context.Background())
+		serverTunnel.Listen(context.Background())
 	}))
 	defer server.Close()
 
@@ -69,7 +69,7 @@ func createConnectedTunnels(t *testing.T) (*Tunnel, *Tunnel) {
 		t.FailNow()
 	}
 	clientTunnel := NewTunnel(conn)
-	go clientTunnel.StartReadLoop(context.Background())
+	go clientTunnel.Listen(context.Background())
 
 	return clientTunnel, <-serverTunnelChan
 }
@@ -81,7 +81,7 @@ func TestTunnelClose(t *testing.T) {
 
 	clientTunnel, serverTunnel := createConnectedTunnels(t)
 
-	clientTunnel.SetTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+	clientTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
 		tunnel.Send(MessageKindText, &TextPayload{
 			Text: payload.Text,
 		})
@@ -102,7 +102,7 @@ func TestTunnelClose(t *testing.T) {
 	})
 
 	responseChan := make(chan string)
-	serverTunnel.SetTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+	serverTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
 		responseChan <- string(payload.Text)
 	})
 

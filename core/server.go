@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/campbel/tiny-tunnel/log"
-	"github.com/campbel/tiny-tunnel/sync"
+	"github.com/campbel/tiny-tunnel/internal/log"
+	"github.com/campbel/tiny-tunnel/internal/sync"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
@@ -111,7 +111,7 @@ func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 		websocketConns: sync.NewMap[string, *sync.WSConn](),
 	}
 
-	server.tunnel.SetWebsocketMessageHandler(func(tunnel *Tunnel, id string, payload WebsocketMessagePayload) {
+	server.tunnel.RegisterWebsocketMessageHandler(func(tunnel *Tunnel, id string, payload WebsocketMessagePayload) {
 		log.Debug("handling websocket message", "payload", payload)
 		conn, ok := server.websocketConns.Get(payload.SessionID)
 		if !ok {
@@ -123,7 +123,7 @@ func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 		}
 	})
 
-	server.tunnel.SetWebsocketCloseHandler(func(tunnel *Tunnel, id string, payload WebsocketClosePayload) {
+	server.tunnel.RegisterWebsocketCloseHandler(func(tunnel *Tunnel, id string, payload WebsocketClosePayload) {
 		log.Debug("handling websocket close", "payload", payload)
 		conn, ok := server.websocketConns.Get(payload.SessionID)
 		if !ok {
@@ -139,7 +139,7 @@ func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 }
 
 func (s *ServerTunnel) Start(ctx context.Context) {
-	s.tunnel.StartReadLoop(ctx)
+	s.tunnel.Listen(ctx)
 }
 
 func (s *ServerTunnel) Stop() {

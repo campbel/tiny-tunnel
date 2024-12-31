@@ -1,8 +1,8 @@
 package core
 
 import (
-	"encoding/json"
 	"net/http"
+	"time"
 )
 
 const (
@@ -27,25 +27,11 @@ type TextPayload struct {
 	Text string `json:"text"`
 }
 
-func (p *TextPayload) Bytes() []byte {
-	json, _ := json.Marshal(p)
-	return json
-}
-
-type Payload interface {
-	Bytes() []byte
-}
-
 type HttpRequestPayload struct {
 	Method  string      `json:"method"`
 	Path    string      `json:"path"`
 	Headers http.Header `json:"headers"`
 	Body    []byte      `json:"body"`
-}
-
-func (p *HttpRequestPayload) Bytes() []byte {
-	json, _ := json.Marshal(p)
-	return json
 }
 
 type HttpResponsePayload struct {
@@ -59,19 +45,9 @@ type HttpResponse struct {
 	Body    []byte      `json:"body"`
 }
 
-func (p *HttpResponsePayload) Bytes() []byte {
-	json, _ := json.Marshal(p)
-	return json
-}
-
 type WebsocketCreateRequestPayload struct {
 	Origin string `json:"origin"`
 	Path   string `json:"path"`
-}
-
-func (p *WebsocketCreateRequestPayload) Bytes() []byte {
-	json, _ := json.Marshal(p)
-	return json
 }
 
 type WebsocketCreateResponsePayload struct {
@@ -80,27 +56,49 @@ type WebsocketCreateResponsePayload struct {
 	HttpResponse *HttpResponsePayload `json:"http_response"`
 }
 
-func (p *WebsocketCreateResponsePayload) Bytes() []byte {
-	json, _ := json.Marshal(p)
-	return json
-}
-
 type WebsocketMessagePayload struct {
 	SessionID string `json:"session_id"`
 	Kind      int    `json:"kind"`
 	Data      []byte `json:"data"`
 }
 
-func (p *WebsocketMessagePayload) Bytes() []byte {
-	json, _ := json.Marshal(p)
-	return json
-}
-
 type WebsocketClosePayload struct {
 	SessionID string `json:"session_id"`
 }
 
-func (p *WebsocketClosePayload) Bytes() []byte {
-	json, _ := json.Marshal(p)
-	return json
+type HTTPRequest struct {
+	Method    string      `json:"method,omitempty"`
+	Path      string      `json:"path,omitempty"`
+	Headers   http.Header `json:"headers,omitempty"`
+	Body      []byte      `json:"body,omitempty"`
+	CreatedAt time.Time   `json:"created_at,omitempty"`
+}
+
+type HTTPResponse struct {
+	Status  int         `json:"status,omitempty"`
+	Headers http.Header `json:"headers,omitempty"`
+	Body    []byte      `json:"body,omitempty"`
+	Error   string      `json:"error,omitempty"`
+}
+
+type WebsocketCreateRequest struct {
+	Path    string      `json:"path,omitempty"`
+	Headers http.Header `json:"headers,omitempty"`
+	Origin  string      `json:"origin,omitempty"`
+}
+
+type WebsocketCreateResponse struct {
+	SessionID string `json:"session_id,omitempty"`
+}
+
+type WebsocketMessage struct {
+	SessionID string `json:"session_id,omitempty"`
+
+	DataType   byte   `json:"is_binary,omitempty"`
+	BinaryData []byte `json:"payload,omitempty"`
+	StringData string `json:"string_payload,omitempty"`
+}
+
+type WebsocketCloseMessage struct {
+	SessionID string `json:"session_id,omitempty"`
 }

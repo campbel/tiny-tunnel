@@ -9,7 +9,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/campbel/tiny-tunnel/log"
+	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/spf13/cobra"
 )
 

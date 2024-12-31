@@ -10,8 +10,8 @@ import (
 	"net/http"
 	gsync "sync"
 
-	"github.com/campbel/tiny-tunnel/log"
-	"github.com/campbel/tiny-tunnel/sync"
+	"github.com/campbel/tiny-tunnel/internal/log"
+	"github.com/campbel/tiny-tunnel/internal/sync"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -67,12 +67,12 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 		c.tunnel.Close()
 	}()
 
-	c.tunnel.SetTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+	c.tunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
 		log.Debug("handling text", "payload", payload)
 		fmt.Println("Received text:", payload.Text)
 	})
 
-	c.tunnel.SetHttpRequestHandler(func(tunnel *Tunnel, id string, payload HttpRequestPayload) {
+	c.tunnel.RegisterHttpRequestHandler(func(tunnel *Tunnel, id string, payload HttpRequestPayload) {
 		log.Debug("handling http request", "payload", payload)
 		var body *bytes.Reader
 		if payload.Body != nil {
@@ -112,7 +112,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 		}})
 	})
 
-	c.tunnel.SetWebsocketCreateRequestHandler(func(tunnel *Tunnel, id string, payload WebsocketCreateRequestPayload) {
+	c.tunnel.RegisterWebsocketCreateRequestHandler(func(tunnel *Tunnel, id string, payload WebsocketCreateRequestPayload) {
 		log.Debug("handling websocket create request", "payload", payload)
 		wsUrl, err := getWebsocketURL(c.options.Target)
 		if err != nil {
@@ -164,7 +164,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 		}()
 	})
 
-	c.tunnel.SetWebsocketMessageHandler(func(tunnel *Tunnel, id string, payload WebsocketMessagePayload) {
+	c.tunnel.RegisterWebsocketMessageHandler(func(tunnel *Tunnel, id string, payload WebsocketMessagePayload) {
 		log.Debug("handling websocket message", "payload", payload)
 		conn, ok := c.wsSessions.Get(payload.SessionID)
 		if !ok {
@@ -176,7 +176,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 		}
 	})
 
-	c.tunnel.SetWebsocketCloseHandler(func(tunnel *Tunnel, id string, payload WebsocketClosePayload) {
+	c.tunnel.RegisterWebsocketCloseHandler(func(tunnel *Tunnel, id string, payload WebsocketClosePayload) {
 		log.Debug("handling websocket close", "payload", payload)
 		conn, ok := c.wsSessions.Get(payload.SessionID)
 		if !ok {
@@ -191,7 +191,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 
 	doneChan := make(chan bool)
 	go func() {
-		c.tunnel.StartReadLoop(ctx)
+		c.tunnel.Listen(ctx)
 		doneChan <- true
 	}()
 

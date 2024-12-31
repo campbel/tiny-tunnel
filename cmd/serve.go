@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/campbel/tiny-tunnel/core"
-	"github.com/campbel/tiny-tunnel/log"
+	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/spf13/cobra"
 )
 

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/campbel/tiny-tunnel/util"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 )
@@ -60,7 +60,7 @@ func TestServerRegister(t *testing.T) {
 
 func TestServerConnectWithClient(t *testing.T) {
 	assert := assert.New(t)
-	randomString := util.RandString(20)
+	randomString := uuid.New().String()
 
 	appServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, randomString)
