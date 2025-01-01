@@ -1,0 +1,28 @@
+router-link {
+  display: inline-block;
+}
+
+router-link a {
+  display: inline-flex;
+  padding: 0.5rem 1rem;
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition: all 0.2s ease;
+  background: white;
+  border: 1px solid var(--border);
+}
+
+router-link a:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+router-link[active] a {
+  background-color: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}

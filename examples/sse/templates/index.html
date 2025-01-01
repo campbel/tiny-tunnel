@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="/components/router-link.js"></script>
+  <link rel="stylesheet" href="/components/router-link.css">
   <style>
     :root {
       --primary: #2563eb;
@@ -13,6 +15,55 @@
       --text: #0f172a;
       --text-light: #64748b;
       --border: #e2e8f0;
+      --error: #ef4444;
+    }
+
+    /* ... existing styles ... */
+
+    .connection-status {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      padding: 0.5rem 1rem;
+      border-radius: 0.5rem;
+      background: white;
+      border: 1px solid var(--border);
+      font-size: 0.875rem;
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      z-index: 50;
+    }
+
+    .connection-status.visible {
+      display: flex;
+    }
+
+    .connection-status.error {
+      border-color: var(--error);
+      color: var(--error);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--primary);
+    }
+
+    .connection-status.error .status-dot {
+      background: var(--error);
+    }
+
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.5; }
+      100% { opacity: 1; }
+    }
+
+    .status-dot.connecting {
+      animation: pulse 1.5s infinite;
     }
 
     * {
@@ -142,8 +193,8 @@
     <header>
       <h1>SSE Website</h1>
       <nav>
-        <a id="home" class="nav-link" href="/">Home</a>
-        <a id="foo" class="nav-link" href="/foo">Foo</a>
+        <router-link id="home" href="/" text="Home" ></router-link>
+        <router-link id="foo" href="/foo" text="Foo" ></router-link>
       </nav>
     </header>
     <main>
@@ -196,10 +247,34 @@
     });
 
     const eventSource = new EventSource("/events?id=" + id);
+    let messageBuffer = [];
+
     eventSource.onmessage = (event) => {
-      // decode the base64 data
-      const data = atob(event.data);
-      updateContent(data);
+      try {
+        // Try to parse as JSON first
+        const data = JSON.parse(event.data);
+        if (data.html) {
+          updateContent(data.html);
+          return;
+        }
+      } catch (e) {
+        // If not JSON, try base64
+        try {
+          const decoded = atob(event.data);
+          updateContent(decoded);
+          return;
+        } catch (e2) {
+          // If neither JSON nor base64, handle as potentially multi-line
+          if (event.data === '') {
+            // Empty line indicates end of message
+            const fullContent = messageBuffer.join('\n');
+            updateContent(fullContent);
+            messageBuffer = [];
+          } else {
+            messageBuffer.push(event.data);
+          }
+        }
+      }
     };
   </script>
 </body>

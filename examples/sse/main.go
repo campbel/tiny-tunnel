@@ -133,5 +133,7 @@ func main() {
 		}
 	})
 
+	http.Handle("/components/", http.StripPrefix("/components/", http.FileServer(http.Dir("components"))))
+
 	http.ListenAndServe(":8080", nil)
 }
