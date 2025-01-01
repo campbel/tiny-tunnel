@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	gsync "sync"
+	"sync"
 
 	"github.com/campbel/tiny-tunnel/internal/log"
-	"github.com/campbel/tiny-tunnel/internal/sync"
+	"github.com/campbel/tiny-tunnel/internal/safe"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -21,11 +21,11 @@ type ClientTunnel struct {
 
 	tunnel     *Tunnel
 	httpClient *http.Client
-	wsSessions *sync.Map[string, *sync.WSConn]
+	wsSessions *safe.Map[string, *safe.WSConn]
 
 	// manage the client tunnel done channel
 	done   <-chan bool
-	waitMu gsync.Mutex
+	waitMu sync.Mutex
 	isDone bool
 }
 
@@ -40,7 +40,7 @@ func NewClientTunnel(options ClientOptions) *ClientTunnel {
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: options.Insecure},
 			},
 		},
-		wsSessions: sync.NewMap[string, *sync.WSConn](),
+		wsSessions: safe.NewMap[string, *safe.WSConn](),
 	}
 }
 
@@ -130,7 +130,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 			return
 		}
 
-		conn := sync.NewWSConn(rawConn)
+		conn := safe.NewWSConn(rawConn)
 
 		sessionID := uuid.New().String()
 		if ok := c.wsSessions.SetNX(sessionID, conn); !ok {

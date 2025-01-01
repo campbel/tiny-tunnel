@@ -3,26 +3,26 @@ package core
 import (
 	"context"
 	"encoding/json"
-	gsync "sync"
+	"sync"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/internal/log"
-	"github.com/campbel/tiny-tunnel/internal/sync"
+	"github.com/campbel/tiny-tunnel/internal/safe"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
 type Tunnel struct {
-	conn *sync.WSConn
+	conn *safe.WSConn
 
 	// closure
 	isClosed     bool
 	closeHandler func()
 	closeChan    chan struct{}
-	closeMu      gsync.Mutex
+	closeMu      sync.Mutex
 
 	// responseChannels is a map of message IDs to channels that want to receive the response
-	responseChannels map[string][]chan Message
+	responseChannels *safe.Map[string, []chan Message]
 
 	// Handlers
 	handlerRegistry map[int]func(tunnel *Tunnel, id string, payload []byte)
@@ -30,8 +30,8 @@ type Tunnel struct {
 
 func NewTunnel(conn *websocket.Conn) *Tunnel {
 	return &Tunnel{
-		conn:             sync.NewWSConn(conn),
-		responseChannels: make(map[string][]chan Message),
+		conn:             safe.NewWSConn(conn),
+		responseChannels: safe.NewMap[string, []chan Message](),
 		closeChan:        make(chan struct{}),
 		handlerRegistry:  make(map[int]func(tunnel *Tunnel, id string, payload []byte)),
 	}
@@ -76,7 +76,7 @@ func (t *Tunnel) Send(kind int, message any, reChan ...chan Message) error {
 		Payload: data,
 	}
 	if len(reChan) > 0 {
-		t.responseChannels[msg.ID] = reChan
+		t.responseChannels.SetNX(msg.ID, reChan)
 	}
 	return t.conn.WriteJSON(msg)
 }
@@ -130,8 +130,8 @@ func (t *Tunnel) Listen(ctx context.Context) {
 			// If a message contains a RE, it is a response to a previous message
 			// We need to send it to the channel(s) waiting for the response
 			if msg.RE != "" {
-				if reChans, ok := t.responseChannels[msg.RE]; ok {
-					var wg gsync.WaitGroup
+				if reChans, ok := t.responseChannels.Get(msg.RE); ok {
+					var wg sync.WaitGroup
 					for _, reChan := range reChans {
 						wg.Add(1)
 						go func(reChan chan Message) {
@@ -140,7 +140,7 @@ func (t *Tunnel) Listen(ctx context.Context) {
 						}(reChan)
 					}
 					wg.Wait()
-					delete(t.responseChannels, msg.RE)
+					t.responseChannels.Delete(msg.RE)
 				}
 				return
 			}

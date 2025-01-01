@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/campbel/tiny-tunnel/internal/log"
-	"github.com/campbel/tiny-tunnel/internal/sync"
+	"github.com/campbel/tiny-tunnel/internal/safe"
+
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
@@ -21,7 +22,7 @@ import (
 type ServerHandler struct {
 	options  ServerOptions
 	upgrader websocket.Upgrader
-	tunnels  *sync.Map[string, *ServerTunnel]
+	tunnels  *safe.Map[string, *ServerTunnel]
 }
 
 func NewServerHandler(options ServerOptions) http.Handler {
@@ -32,7 +33,7 @@ func NewServerHandler(options ServerOptions) http.Handler {
 				return true
 			},
 		},
-		tunnels: sync.NewMap[string, *ServerTunnel](),
+		tunnels: safe.NewMap[string, *ServerTunnel](),
 	}
 
 	router := mux.NewRouter()
@@ -103,13 +104,13 @@ func (s *ServerHandler) HandleTunnelRequest(w http.ResponseWriter, r *http.Reque
 
 type ServerTunnel struct {
 	tunnel         *Tunnel
-	websocketConns *sync.Map[string, *sync.WSConn]
+	websocketConns *safe.Map[string, *safe.WSConn]
 }
 
 func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 	server := &ServerTunnel{
 		tunnel:         NewTunnel(conn),
-		websocketConns: sync.NewMap[string, *sync.WSConn](),
+		websocketConns: safe.NewMap[string, *safe.WSConn](),
 	}
 
 	server.tunnel.RegisterWebsocketMessageHandler(func(tunnel *Tunnel, id string, payload WebsocketMessagePayload) {
@@ -207,7 +208,7 @@ func (s *ServerTunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	conn := sync.NewWSConn(rawConn)
+	conn := safe.NewWSConn(rawConn)
 
 	responseChannel := make(chan Message)
 	s.tunnel.Send(MessageKindWebsocketCreateRequest, &WebsocketCreateRequestPayload{

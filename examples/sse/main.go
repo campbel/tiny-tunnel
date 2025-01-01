@@ -1,25 +1,30 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"embed"
+	"encoding/base64"
 	"fmt"
+	"html/template"
 	"net/http"
-	"time"
+
+	"github.com/campbel/tiny-tunnel/internal/safe"
+	"github.com/google/uuid"
 )
 
-const html = `
-<html>
-<body>
-<h1>Hello, world!</h1>
-<div id="count">0</div>
-<script>
-const eventSource = new EventSource("/events");
-eventSource.onmessage = (event) => {
-  document.getElementById("count").innerHTML = event.data;
-};
-</script>
-</body>
-</html>
-`
+//go:embed templates
+var templates embed.FS
+
+var htmlTemplate = template.Must(template.New("html").Parse(mustReadFile("templates/index.html")))
+
+func mustReadFile(name string) string {
+	data, err := templates.ReadFile(name)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}
 
 type Event struct {
 	ID   string
@@ -43,37 +48,87 @@ func writeEvent(w http.ResponseWriter, event Event) {
 	}
 }
 
+type SSEHandler func(context.Context, chan string)
+
+var dataChans = safe.NewMap[string, chan string]()
+var sseHandlers = safe.NewMap[string, SSEHandler]()
+
 func main() {
 	fmt.Println("Starting server on port 8080")
 
+	homeTemplate := template.Must(template.New("home").Parse(mustReadFile("templates/home.html")))
+	sseHandlers.SetNX("/", func(ctx context.Context, ch chan string) {
+		var buf bytes.Buffer
+		homeTemplate.Execute(&buf, nil)
+		ch <- buf.String()
+	})
+
+	fooTemplate := template.Must(template.New("foo").Parse(mustReadFile("templates/foo.html")))
+	sseHandlers.SetNX("/foo", func(ctx context.Context, ch chan string) {
+		var buf bytes.Buffer
+		fooTemplate.Execute(&buf, nil)
+		ch <- buf.String()
+	})
+
+	handleNewClient := func(w http.ResponseWriter, r *http.Request) {
+		id := uuid.New().String()
+		htmlTemplate.Execute(w, map[string]string{
+			"ID": id,
+		})
+		ch := make(chan string)
+		dataChans.SetNX(id, ch)
+		handler, ok := sseHandlers.Get(r.URL.Path)
+		if !ok {
+			ch <- `<h2>Not found</h2>`
+			return
+		}
+		go handler(r.Context(), ch)
+	}
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(html))
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			handleNewClient(w, r)
+		} else {
+			ch, ok := dataChans.Get(id)
+			if !ok {
+				handleNewClient(w, r)
+				return
+			}
+			handler, ok := sseHandlers.Get(r.URL.Path)
+			if !ok {
+				ch <- `<h2>Not found</h2>`
+				return
+			}
+			go handler(r.Context(), ch)
+		}
 	})
 
 	http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		ch, ok := dataChans.Get(id)
+		if !ok {
+			http.Error(w, "client not found", http.StatusNotFound)
+			return
+		}
 		// prepare the header
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
-		// trap the request under loop forever
-		count := 0
 		for {
 			select {
-
+			case data := <-ch:
+				writeEvent(w, Event{
+					ID:   id,
+					Type: "message",
+					Data: base64.StdEncoding.EncodeToString([]byte(data)),
+				})
 			// connection is closed then defer will be executed
 			case <-r.Context().Done():
 				fmt.Println("client disconnected")
 				return
-			default:
-				writeEvent(w, Event{
-					ID:   fmt.Sprintf("%d", count),
-					Type: "message",
-					Data: fmt.Sprintf("%d", count),
-				})
-				count++
-				time.Sleep(1 * time.Second)
 			}
 		}
 	})
