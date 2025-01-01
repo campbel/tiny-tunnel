@@ -33,6 +33,9 @@ func NewClientTunnel(options ClientOptions) *ClientTunnel {
 	return &ClientTunnel{
 		options: options,
 		httpClient: &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: options.Insecure},
 			},
@@ -104,6 +107,7 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 			tunnel.SendResponse(MessageKindHttpResponse, id, &HttpResponsePayload{Error: err})
 			return
 		}
+		log.Debug("sending response", "status", resp.StatusCode, "headers", resp.Header)
 
 		tunnel.SendResponse(MessageKindHttpResponse, id, &HttpResponsePayload{Response: HttpResponse{
 			Status:  resp.StatusCode,

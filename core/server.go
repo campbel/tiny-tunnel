@@ -170,7 +170,6 @@ func (s *ServerTunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request)
 	}, responseChannel)
 
 	response := <-responseChannel
-	log.Debug("received response", "duration", time.Since(start))
 
 	// If the response is not a HttpResponse, we need to return an error
 	if response.Kind != MessageKindHttpResponse {
@@ -183,6 +182,7 @@ func (s *ServerTunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
+	log.Debug("received response", "duration", time.Since(start), "status", responsePayload.Response.Status)
 
 	for k, v := range responsePayload.Response.Headers {
 		for _, vv := range v {
