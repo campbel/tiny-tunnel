@@ -1,0 +1,2 @@
+client: DEBUG=1 air start --name example --target http://localhost:3000
+app: cd examples/nextjs-example && bun run dev

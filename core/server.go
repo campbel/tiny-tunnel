@@ -164,7 +164,7 @@ func (s *ServerTunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request)
 	start := time.Now()
 	s.tunnel.Send(MessageKindHttpRequest, &HttpRequestPayload{
 		Method:  r.Method,
-		Path:    r.URL.Path,
+		Path:    r.URL.Path + "?" + r.URL.Query().Encode(),
 		Headers: r.Header,
 		Body:    bodyBytes,
 	}, responseChannel)
