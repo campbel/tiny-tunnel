@@ -1,4 +1,4 @@
-package core
+package client
 
 import (
 	"bytes"
@@ -10,16 +10,19 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/campbel/tiny-tunnel/core/protocol"
+	"github.com/campbel/tiny-tunnel/core/shared"
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/campbel/tiny-tunnel/internal/safe"
+	"github.com/campbel/tiny-tunnel/internal/util"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
-type ClientTunnel struct {
-	options ClientOptions
+type Tunnel struct {
+	options Options
 
-	tunnel     *Tunnel
+	tunnel     *shared.Tunnel
 	httpClient *http.Client
 	wsSessions *safe.Map[string, *safe.WSConn]
 
@@ -29,8 +32,8 @@ type ClientTunnel struct {
 	isDone bool
 }
 
-func NewClientTunnel(options ClientOptions) *ClientTunnel {
-	return &ClientTunnel{
+func NewTunnel(options Options) *Tunnel {
+	return &Tunnel{
 		options: options,
 		httpClient: &http.Client{
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -45,7 +48,7 @@ func NewClientTunnel(options ClientOptions) *ClientTunnel {
 }
 
 // Wait blocks until the client tunnel is done
-func (c *ClientTunnel) Wait() {
+func (c *Tunnel) Wait() {
 	c.waitMu.Lock()
 	defer c.waitMu.Unlock()
 
@@ -57,25 +60,25 @@ func (c *ClientTunnel) Wait() {
 	c.isDone = true
 }
 
-func (c *ClientTunnel) Connect(ctx context.Context) error {
+func (c *Tunnel) Connect(ctx context.Context) error {
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, c.options.URL(), c.options.ServerHeaders)
 	if err != nil {
 		return err
 	}
 
-	c.tunnel = NewTunnel(conn)
+	c.tunnel = shared.NewTunnel(conn)
 
 	go func() {
 		<-ctx.Done()
 		c.tunnel.Close()
 	}()
 
-	c.tunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+	c.tunnel.RegisterTextHandler(func(tunnel *shared.Tunnel, id string, payload protocol.TextPayload) {
 		log.Debug("handling text", "payload", payload)
 		fmt.Println("Received text:", payload.Text)
 	})
 
-	c.tunnel.RegisterHttpRequestHandler(func(tunnel *Tunnel, id string, payload HttpRequestPayload) {
+	c.tunnel.RegisterHttpRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.HttpRequestPayload) {
 		log.Debug("handling http request", "payload", payload)
 		var body *bytes.Reader
 		if payload.Body != nil {
@@ -97,36 +100,36 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			tunnel.SendResponse(MessageKindHttpResponse, id, &HttpResponsePayload{Error: err})
+			tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
 			return
 		}
 		defer resp.Body.Close()
 
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
-			tunnel.SendResponse(MessageKindHttpResponse, id, &HttpResponsePayload{Error: err})
+			tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
 			return
 		}
 		log.Debug("sending response", "status", resp.StatusCode, "headers", resp.Header)
 
-		tunnel.SendResponse(MessageKindHttpResponse, id, &HttpResponsePayload{Response: HttpResponse{
+		tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Response: protocol.HttpResponse{
 			Status:  resp.StatusCode,
 			Headers: resp.Header,
 			Body:    bodyBytes,
 		}})
 	})
 
-	c.tunnel.RegisterWebsocketCreateRequestHandler(func(tunnel *Tunnel, id string, payload WebsocketCreateRequestPayload) {
+	c.tunnel.RegisterWebsocketCreateRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketCreateRequestPayload) {
 		log.Debug("handling websocket create request", "payload", payload)
-		wsUrl, err := getWebsocketURL(c.options.Target)
+		wsUrl, err := util.GetWebsocketURL(c.options.Target)
 		if err != nil {
-			tunnel.SendResponse(MessageKindWebsocketCreateResponse, id, &WebsocketCreateResponsePayload{Error: err})
+			tunnel.SendResponse(protocol.MessageKindWebsocketCreateResponse, id, &protocol.WebsocketCreateResponsePayload{Error: err})
 			return
 		}
 
 		rawConn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsUrl.String()+payload.Path, http.Header{"Origin": []string{payload.Origin}})
 		if err != nil {
-			tunnel.SendResponse(MessageKindWebsocketCreateResponse, id, &WebsocketCreateResponsePayload{Error: err})
+			tunnel.SendResponse(protocol.MessageKindWebsocketCreateResponse, id, &protocol.WebsocketCreateResponsePayload{Error: err})
 			return
 		}
 
@@ -134,13 +137,13 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 
 		sessionID := uuid.New().String()
 		if ok := c.wsSessions.SetNX(sessionID, conn); !ok {
-			tunnel.SendResponse(MessageKindWebsocketCreateResponse, id, &WebsocketCreateResponsePayload{Error: errors.New("session already exists")})
+			tunnel.SendResponse(protocol.MessageKindWebsocketCreateResponse, id, &protocol.WebsocketCreateResponsePayload{Error: errors.New("session already exists")})
 			return
 		}
 
-		tunnel.SendResponse(MessageKindWebsocketCreateResponse, id, &WebsocketCreateResponsePayload{
+		tunnel.SendResponse(protocol.MessageKindWebsocketCreateResponse, id, &protocol.WebsocketCreateResponsePayload{
 			SessionID: sessionID,
-			HttpResponse: &HttpResponsePayload{Response: HttpResponse{
+			HttpResponse: &protocol.HttpResponsePayload{Response: protocol.HttpResponse{
 				Status:  resp.StatusCode,
 				Headers: resp.Header,
 			}},
@@ -161,18 +164,18 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 					break
 				}
 				log.Debug("read ws message", "session_id", sessionID, "kind", mt, "data", string(data))
-				if err := tunnel.Send(MessageKindWebsocketMessage, &WebsocketMessagePayload{SessionID: sessionID, Kind: mt, Data: data}); err != nil {
+				if err := tunnel.Send(protocol.MessageKindWebsocketMessage, &protocol.WebsocketMessagePayload{SessionID: sessionID, Kind: mt, Data: data}); err != nil {
 					log.Error("failed to send websocket message", "error", err.Error())
 				}
 			}
 		}()
 	})
 
-	c.tunnel.RegisterWebsocketMessageHandler(func(tunnel *Tunnel, id string, payload WebsocketMessagePayload) {
+	c.tunnel.RegisterWebsocketMessageHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketMessagePayload) {
 		log.Debug("handling websocket message", "payload", payload)
 		conn, ok := c.wsSessions.Get(payload.SessionID)
 		if !ok {
-			log.Error("websocket session not found", "session_id", id)
+			log.Error("websocket session not found", "session_id", payload.SessionID)
 			return
 		}
 		if err := conn.WriteMessage(payload.Kind, payload.Data); err != nil {
@@ -180,11 +183,11 @@ func (c *ClientTunnel) Connect(ctx context.Context) error {
 		}
 	})
 
-	c.tunnel.RegisterWebsocketCloseHandler(func(tunnel *Tunnel, id string, payload WebsocketClosePayload) {
+	c.tunnel.RegisterWebsocketCloseHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketClosePayload) {
 		log.Debug("handling websocket close", "payload", payload)
 		conn, ok := c.wsSessions.Get(payload.SessionID)
 		if !ok {
-			log.Error("websocket session not found", "session_id", id)
+			log.Error("websocket session not found", "session_id", payload.SessionID)
 			return
 		}
 		if err := conn.Close(); err != nil {

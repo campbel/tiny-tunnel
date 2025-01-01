@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/campbel/tiny-tunnel/core"
+	"github.com/campbel/tiny-tunnel/core/client"
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/spf13/cobra"
 )
@@ -31,7 +31,7 @@ var startCmd = &cobra.Command{
 	Short: "",
 	Long:  ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		options := core.ClientOptions{
+		options := client.Options{
 			Target:            target,
 			Name:              name,
 			ServerHost:        serverHost,
@@ -42,7 +42,7 @@ var startCmd = &cobra.Command{
 			TargetHeaders:     convertMapToHeaders(targetHeaders),
 			ServerHeaders:     convertMapToHeaders(serverHeaders),
 		}
-		clientTunnel := core.NewClientTunnel(options)
+		clientTunnel := client.NewTunnel(options)
 
 		log.Info("connecting...")
 	LOOP:
@@ -78,7 +78,7 @@ func init() {
 	startCmd.Flags().StringToStringVarP(&serverHeaders, "server-headers", "S", map[string]string{}, "Server headers")
 }
 
-func getTunnelAddress(options core.ClientOptions) string {
+func getTunnelAddress(options client.Options) string {
 	if options.Insecure {
 		return fmt.Sprintf("http://%s.%s:%s", options.Name, options.ServerHost, options.ServerPort)
 	}

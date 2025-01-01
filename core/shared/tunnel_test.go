@@ -1,4 +1,4 @@
-package core
+package shared
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/campbel/tiny-tunnel/core/protocol"
+	"github.com/campbel/tiny-tunnel/internal/util"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
@@ -16,21 +18,21 @@ func TestTunnel(t *testing.T) {
 	assert := assert.New(t)
 	clientTunnel, serverTunnel := createConnectedTunnels(t)
 
-	clientTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+	clientTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload protocol.TextPayload) {
 		assert.Equal(payload.Text, "Hello, World!")
 		response := []byte(payload.Text)
 		slices.Reverse(response)
-		tunnel.Send(MessageKindText, &TextPayload{
+		tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
 			Text: string(response),
 		})
 	})
 
 	responseChan := make(chan string)
-	serverTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+	serverTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload protocol.TextPayload) {
 		responseChan <- string(payload.Text)
 	})
 
-	serverTunnel.Send(MessageKindText, &TextPayload{
+	serverTunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
 		Text: "Hello, World!",
 	})
 
@@ -60,7 +62,7 @@ func createConnectedTunnels(t *testing.T) (*Tunnel, *Tunnel) {
 	defer server.Close()
 
 	// Setup the client
-	serverWSURL, err := getWebsocketURL(server.URL)
+	serverWSURL, err := util.GetWebsocketURL(server.URL)
 	if !assert.NoError(err) {
 		t.FailNow()
 	}
@@ -81,8 +83,8 @@ func TestTunnelClose(t *testing.T) {
 
 	clientTunnel, serverTunnel := createConnectedTunnels(t)
 
-	clientTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
-		tunnel.Send(MessageKindText, &TextPayload{
+	clientTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload protocol.TextPayload) {
+		tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
 			Text: payload.Text,
 		})
 	})
@@ -102,11 +104,11 @@ func TestTunnelClose(t *testing.T) {
 	})
 
 	responseChan := make(chan string)
-	serverTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload TextPayload) {
+	serverTunnel.RegisterTextHandler(func(tunnel *Tunnel, id string, payload protocol.TextPayload) {
 		responseChan <- string(payload.Text)
 	})
 
-	serverTunnel.Send(MessageKindText, &TextPayload{
+	serverTunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
 		Text: randomString,
 	})
 

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/campbel/tiny-tunnel/core"
+	"github.com/campbel/tiny-tunnel/core/server"
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/spf13/cobra"
 )
@@ -28,7 +28,7 @@ var serveCmd = &cobra.Command{
 
 		ctx := cmd.Context()
 
-		router := core.NewServerHandler(core.ServerOptions{
+		router := server.NewHandler(server.Options{
 			Hostname: hostname,
 		})
 

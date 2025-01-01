@@ -1,4 +1,4 @@
-package core
+package client
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-type ClientOptions struct {
+type Options struct {
 	Target            string
 	Name              string
 	ServerHost        string
@@ -18,29 +18,29 @@ type ClientOptions struct {
 	ServerHeaders     http.Header
 }
 
-func (c ClientOptions) Origin() string {
+func (c Options) Origin() string {
 	return c.SchemeHTTP() + "://" + c.ServerHost
 }
 
-func (c ClientOptions) URL() string {
+func (c Options) URL() string {
 	return c.SchemeWS() + "://" + c.ServerHost + ":" + c.ServerPort + "/register?name=" + c.Name
 }
 
-func (c ClientOptions) SchemeHTTP() string {
+func (c Options) SchemeHTTP() string {
 	if c.Insecure {
 		return "http"
 	}
 	return "https"
 }
 
-func (c ClientOptions) SchemeWS() string {
+func (c Options) SchemeWS() string {
 	if c.Insecure {
 		return "ws"
 	}
 	return "wss"
 }
 
-func (c ClientOptions) Valid() error {
+func (c Options) Valid() error {
 	var errs []error
 	if c.Name == "" {
 		errs = append(errs, fmt.Errorf("name is required"))

@@ -1,4 +1,4 @@
-package core
+package shared
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/campbel/tiny-tunnel/core/protocol"
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/campbel/tiny-tunnel/internal/safe"
 	"github.com/google/uuid"
@@ -22,7 +23,7 @@ type Tunnel struct {
 	closeMu      sync.Mutex
 
 	// responseChannels is a map of message IDs to channels that want to receive the response
-	responseChannels *safe.Map[string, []chan Message]
+	responseChannels *safe.Map[string, []chan protocol.Message]
 
 	// Handlers
 	handlerRegistry map[int]func(tunnel *Tunnel, id string, payload []byte)
@@ -31,7 +32,7 @@ type Tunnel struct {
 func NewTunnel(conn *websocket.Conn) *Tunnel {
 	return &Tunnel{
 		conn:             safe.NewWSConn(conn),
-		responseChannels: safe.NewMap[string, []chan Message](),
+		responseChannels: safe.NewMap[string, []chan protocol.Message](),
 		closeChan:        make(chan struct{}),
 		handlerRegistry:  make(map[int]func(tunnel *Tunnel, id string, payload []byte)),
 	}
@@ -64,13 +65,13 @@ func (t *Tunnel) close(peerSent bool) {
 	}
 }
 
-func (t *Tunnel) Send(kind int, message any, reChan ...chan Message) error {
+func (t *Tunnel) Send(kind int, message any, reChan ...chan protocol.Message) error {
 	data, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
 
-	msg := Message{
+	msg := protocol.Message{
 		ID:      uuid.New().String(),
 		Kind:    kind,
 		Payload: data,
@@ -87,7 +88,7 @@ func (t *Tunnel) SendResponse(kind int, id string, message any) error {
 		return err
 	}
 
-	msg := Message{
+	msg := protocol.Message{
 		ID:      uuid.New().String(),
 		RE:      id,
 		Kind:    kind,
@@ -107,7 +108,7 @@ func (t *Tunnel) Listen(ctx context.Context) {
 	}()
 
 	for {
-		var msg Message
+		var msg protocol.Message
 		err := t.conn.ReadJSON(&msg)
 		if err != nil {
 			// if err is websocket.CloseError, we need to close the tunnel
@@ -125,7 +126,7 @@ func (t *Tunnel) Listen(ctx context.Context) {
 		}
 
 		// Handle the message
-		go func(msg Message) {
+		go func(msg protocol.Message) {
 
 			// If a message contains a RE, it is a response to a previous message
 			// We need to send it to the channel(s) waiting for the response
@@ -134,7 +135,7 @@ func (t *Tunnel) Listen(ctx context.Context) {
 					var wg sync.WaitGroup
 					for _, reChan := range reChans {
 						wg.Add(1)
-						go func(reChan chan Message) {
+						go func(reChan chan protocol.Message) {
 							defer wg.Done()
 							reChan <- msg
 						}(reChan)
@@ -169,22 +170,22 @@ func HandlerFunc[T any](handler func(tunnel *Tunnel, id string, payload T)) func
 	}
 }
 
-func (t *Tunnel) RegisterTextHandler(handler func(tunnel *Tunnel, id string, payload TextPayload)) {
-	t.registerHandler(MessageKindText, HandlerFunc(handler))
+func (t *Tunnel) RegisterTextHandler(handler func(tunnel *Tunnel, id string, payload protocol.TextPayload)) {
+	t.registerHandler(protocol.MessageKindText, HandlerFunc(handler))
 }
 
-func (t *Tunnel) RegisterHttpRequestHandler(handler func(tunnel *Tunnel, id string, payload HttpRequestPayload)) {
-	t.registerHandler(MessageKindHttpRequest, HandlerFunc(handler))
+func (t *Tunnel) RegisterHttpRequestHandler(handler func(tunnel *Tunnel, id string, payload protocol.HttpRequestPayload)) {
+	t.registerHandler(protocol.MessageKindHttpRequest, HandlerFunc(handler))
 }
 
-func (t *Tunnel) RegisterWebsocketCreateRequestHandler(handler func(tunnel *Tunnel, id string, payload WebsocketCreateRequestPayload)) {
-	t.registerHandler(MessageKindWebsocketCreateRequest, HandlerFunc(handler))
+func (t *Tunnel) RegisterWebsocketCreateRequestHandler(handler func(tunnel *Tunnel, id string, payload protocol.WebsocketCreateRequestPayload)) {
+	t.registerHandler(protocol.MessageKindWebsocketCreateRequest, HandlerFunc(handler))
 }
 
-func (t *Tunnel) RegisterWebsocketMessageHandler(handler func(tunnel *Tunnel, id string, payload WebsocketMessagePayload)) {
-	t.registerHandler(MessageKindWebsocketMessage, HandlerFunc(handler))
+func (t *Tunnel) RegisterWebsocketMessageHandler(handler func(tunnel *Tunnel, id string, payload protocol.WebsocketMessagePayload)) {
+	t.registerHandler(protocol.MessageKindWebsocketMessage, HandlerFunc(handler))
 }
 
-func (t *Tunnel) RegisterWebsocketCloseHandler(handler func(tunnel *Tunnel, id string, payload WebsocketClosePayload)) {
-	t.registerHandler(MessageKindWebsocketClose, HandlerFunc(handler))
+func (t *Tunnel) RegisterWebsocketCloseHandler(handler func(tunnel *Tunnel, id string, payload protocol.WebsocketClosePayload)) {
+	t.registerHandler(protocol.MessageKindWebsocketClose, HandlerFunc(handler))
 }

@@ -1,4 +1,4 @@
-package core
+package server
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/campbel/tiny-tunnel/core/client"
+	"github.com/campbel/tiny-tunnel/internal/util"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
@@ -18,7 +20,7 @@ import (
 func TestServerRoot(t *testing.T) {
 	assert := assert.New(t)
 
-	server := httptest.NewServer(NewServerHandler(ServerOptions{
+	server := httptest.NewServer(NewHandler(Options{
 		Hostname: "example.com",
 	}))
 	defer server.Close()
@@ -40,12 +42,12 @@ func TestServerRoot(t *testing.T) {
 func TestServerRegister(t *testing.T) {
 	assert := assert.New(t)
 
-	server := httptest.NewServer(NewServerHandler(ServerOptions{
+	server := httptest.NewServer(NewHandler(Options{
 		Hostname: "example.com",
 	}))
 	defer server.Close()
 
-	wsURL, err := getWebsocketURL(server.URL)
+	wsURL, err := util.GetWebsocketURL(server.URL)
 	if !assert.NoError(err) {
 		return
 	}
@@ -67,7 +69,7 @@ func TestServerConnectWithClient(t *testing.T) {
 	}))
 	defer appServer.Close()
 
-	server := httptest.NewServer(NewServerHandler(ServerOptions{
+	server := httptest.NewServer(NewHandler(Options{
 		Hostname: "example.com",
 	}))
 	defer server.Close()
@@ -79,7 +81,7 @@ func TestServerConnectWithClient(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := NewClientTunnel(ClientOptions{
+	client := client.NewTunnel(client.Options{
 		Name:       "test",
 		ServerHost: serverURL.Hostname(),
 		ServerPort: serverURL.Port(),
@@ -150,7 +152,7 @@ func TestServerTunnel(t *testing.T) {
 
 	clientCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	clientTunnel := NewClientTunnel(ClientOptions{
+	clientTunnel := client.NewTunnel(client.Options{
 		Name:       "test",
 		ServerHost: strings.Split(serverURL.Host, ":")[0],
 		ServerPort: serverURL.Port(),

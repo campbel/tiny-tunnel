@@ -1,11 +1,11 @@
-package core
+package util
 
 import (
 	"fmt"
 	"net/url"
 )
 
-func getWebsocketURL(httpURL string) (*url.URL, error) {
+func GetWebsocketURL(httpURL string) (*url.URL, error) {
 	u, err := url.Parse(httpURL)
 	if err != nil {
 		return nil, err

@@ -10,7 +10,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/campbel/tiny-tunnel/core"
+	"github.com/campbel/tiny-tunnel/core/client"
+	"github.com/campbel/tiny-tunnel/core/server"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 )
@@ -48,14 +49,14 @@ func TestE2E(t *testing.T) {
 	}))
 	defer appServer.Close()
 
-	server := httptest.NewServer(core.NewServerHandler(core.ServerOptions{
+	server := httptest.NewServer(server.NewHandler(server.Options{
 		Hostname: "example.com",
 	}))
 	defer server.Close()
 
 	serverURL, _ := url.Parse(server.URL)
 
-	client := core.NewClientTunnel(core.ClientOptions{
+	client := client.NewTunnel(client.Options{
 		Name:       "test",
 		ServerHost: serverURL.Hostname(),
 		ServerPort: serverURL.Port(),

@@ -1,4 +1,4 @@
-package core
+package server
 
 import (
 	"context"
@@ -11,6 +11,9 @@ import (
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/campbel/tiny-tunnel/internal/safe"
 
+	"github.com/campbel/tiny-tunnel/core/protocol"
+	"github.com/campbel/tiny-tunnel/core/shared"
+
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
@@ -19,14 +22,14 @@ import (
 /// Server Handler
 ///
 
-type ServerHandler struct {
-	options  ServerOptions
+type Handler struct {
+	options  Options
 	upgrader websocket.Upgrader
 	tunnels  *safe.Map[string, *ServerTunnel]
 }
 
-func NewServerHandler(options ServerOptions) http.Handler {
-	server := &ServerHandler{
+func NewHandler(options Options) http.Handler {
+	server := &Handler{
 		options: options,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
@@ -44,7 +47,7 @@ func NewServerHandler(options ServerOptions) http.Handler {
 	return router
 }
 
-func (s *ServerHandler) HandleRoot(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) HandleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-TT-Tunnel") != "" {
 		s.HandleTunnelRequest(w, r)
 		return
@@ -53,7 +56,7 @@ func (s *ServerHandler) HandleRoot(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "Welcome to Tiny Tunnel. See github.com/campbel/tiny-tunnel for more info.")
 }
 
-func (s *ServerHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	name := r.FormValue("name")
 	if name == "" {
 		http.Error(w, "name is required", http.StatusBadRequest)
@@ -79,7 +82,7 @@ func (s *ServerHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	log.Info("unregistered tunnel", "name", name)
 }
 
-func (s *ServerHandler) HandleTunnelRequest(w http.ResponseWriter, r *http.Request) {
+func (s *Handler) HandleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 	tunnelID := mux.Vars(r)["tunnel"]
 	if tunnelID == "" {
 		tunnelID = r.Header.Get("X-TT-Tunnel")
@@ -103,17 +106,17 @@ func (s *ServerHandler) HandleTunnelRequest(w http.ResponseWriter, r *http.Reque
 ///
 
 type ServerTunnel struct {
-	tunnel         *Tunnel
+	tunnel         *shared.Tunnel
 	websocketConns *safe.Map[string, *safe.WSConn]
 }
 
 func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 	server := &ServerTunnel{
-		tunnel:         NewTunnel(conn),
+		tunnel:         shared.NewTunnel(conn),
 		websocketConns: safe.NewMap[string, *safe.WSConn](),
 	}
 
-	server.tunnel.RegisterWebsocketMessageHandler(func(tunnel *Tunnel, id string, payload WebsocketMessagePayload) {
+	server.tunnel.RegisterWebsocketMessageHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketMessagePayload) {
 		log.Debug("handling websocket message", "payload", payload)
 		conn, ok := server.websocketConns.Get(payload.SessionID)
 		if !ok {
@@ -125,7 +128,7 @@ func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 		}
 	})
 
-	server.tunnel.RegisterWebsocketCloseHandler(func(tunnel *Tunnel, id string, payload WebsocketClosePayload) {
+	server.tunnel.RegisterWebsocketCloseHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketClosePayload) {
 		log.Debug("handling websocket close", "payload", payload)
 		conn, ok := server.websocketConns.Get(payload.SessionID)
 		if !ok {
@@ -154,7 +157,7 @@ func (s *ServerTunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	responseChannel := make(chan Message)
+	responseChannel := make(chan protocol.Message)
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -163,7 +166,7 @@ func (s *ServerTunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	start := time.Now()
-	s.tunnel.Send(MessageKindHttpRequest, &HttpRequestPayload{
+	s.tunnel.Send(protocol.MessageKindHttpRequest, &protocol.HttpRequestPayload{
 		Method:  r.Method,
 		Path:    r.URL.Path + "?" + r.URL.Query().Encode(),
 		Headers: r.Header,
@@ -173,12 +176,12 @@ func (s *ServerTunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request)
 	response := <-responseChannel
 
 	// If the response is not a HttpResponse, we need to return an error
-	if response.Kind != MessageKindHttpResponse {
+	if response.Kind != protocol.MessageKindHttpResponse {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
 
-	var responsePayload HttpResponsePayload
+	var responsePayload protocol.HttpResponsePayload
 	if err := json.Unmarshal(response.Payload, &responsePayload); err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
@@ -210,20 +213,20 @@ func (s *ServerTunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Req
 
 	conn := safe.NewWSConn(rawConn)
 
-	responseChannel := make(chan Message)
-	s.tunnel.Send(MessageKindWebsocketCreateRequest, &WebsocketCreateRequestPayload{
+	responseChannel := make(chan protocol.Message)
+	s.tunnel.Send(protocol.MessageKindWebsocketCreateRequest, &protocol.WebsocketCreateRequestPayload{
 		Origin: r.Header.Get("Origin"),
 		Path:   r.URL.Path,
 	}, responseChannel)
 
 	response := <-responseChannel
 
-	if response.Kind != MessageKindWebsocketCreateResponse {
+	if response.Kind != protocol.MessageKindWebsocketCreateResponse {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
 
-	var responsePayload WebsocketCreateResponsePayload
+	var responsePayload protocol.WebsocketCreateResponsePayload
 	if err := json.Unmarshal(response.Payload, &responsePayload); err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
@@ -242,7 +245,7 @@ func (s *ServerTunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Req
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
 			log.Debug("app websocket connection closed", "sessionID", responsePayload.SessionID, "error", err.Error())
-			if err := s.tunnel.Send(MessageKindWebsocketClose, &WebsocketClosePayload{
+			if err := s.tunnel.Send(protocol.MessageKindWebsocketClose, &protocol.WebsocketClosePayload{
 				SessionID: responsePayload.SessionID,
 			}); err != nil {
 				log.Error("failed to send websocket close", "error", err.Error())
@@ -250,7 +253,7 @@ func (s *ServerTunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Req
 			return
 		}
 
-		if err := s.tunnel.Send(MessageKindWebsocketMessage, &WebsocketMessagePayload{
+		if err := s.tunnel.Send(protocol.MessageKindWebsocketMessage, &protocol.WebsocketMessagePayload{
 			SessionID: responsePayload.SessionID,
 			Kind:      messageType,
 			Data:      message,
