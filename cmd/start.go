@@ -6,6 +6,7 @@ package cmd
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/campbel/tiny-tunnel/core"
 	"github.com/campbel/tiny-tunnel/internal/log"
@@ -43,13 +44,22 @@ var startCmd = &cobra.Command{
 		}
 		clientTunnel := core.NewClientTunnel(options)
 
-		log.Info("starting client tunnel", "options", options)
-		if err := clientTunnel.Connect(cmd.Context()); err != nil {
-			return err
+		log.Info("connecting...")
+	LOOP:
+		for i := 0; i < reconnectAttempts; i++ {
+			select {
+			case <-cmd.Context().Done():
+				break LOOP
+			default:
+				if err := clientTunnel.Connect(cmd.Context()); err != nil {
+					log.Error("error connecting to tunnel", "err", err)
+					time.Sleep(3 * time.Second)
+					continue
+				}
+				log.Info("connected", "address", getTunnelAddress(options))
+				clientTunnel.Wait()
+			}
 		}
-		log.Info("tunnel started", "address", getTunnelAddress(options))
-
-		clientTunnel.Wait()
 
 		return nil
 	},

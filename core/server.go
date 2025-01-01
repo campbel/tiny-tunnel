@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/campbel/tiny-tunnel/internal/sync"
@@ -160,6 +161,7 @@ func (s *ServerTunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	start := time.Now()
 	s.tunnel.Send(MessageKindHttpRequest, &HttpRequestPayload{
 		Method:  r.Method,
 		Path:    r.URL.Path,
@@ -168,6 +170,7 @@ func (s *ServerTunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request)
 	}, responseChannel)
 
 	response := <-responseChannel
+	log.Debug("received response", "duration", time.Since(start))
 
 	// If the response is not a HttpResponse, we need to return an error
 	if response.Kind != MessageKindHttpResponse {
