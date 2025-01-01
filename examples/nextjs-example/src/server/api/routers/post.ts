@@ -38,4 +38,14 @@ export const postRouter = createTRPCRouter({
   getSecretMessage: protectedProcedure.query(() => {
     return "you can now see this secret message!";
   }),
+
+  getAccount: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.db.account.findFirst({
+      where: { userId: ctx.session.user.id },
+    });
+  }),
+
+  echo: publicProcedure.input(z.object({ message: z.string() })).query(({ input }) => {
+    return input.message;
+  }),
 });

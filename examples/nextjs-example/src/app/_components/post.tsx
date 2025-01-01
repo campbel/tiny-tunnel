@@ -6,6 +6,11 @@ import { api } from "~/trpc/react";
 
 export function LatestPost() {
   const [latestPost] = api.post.getLatest.useSuspenseQuery();
+  const account = api.post.getAccount.useQuery();
+  console.log(account);
+
+  const echo = api.post.echo.useQuery({ message: "Hello, world!" });
+  console.log(echo);
 
   const utils = api.useUtils();
   const [name, setName] = useState("");
