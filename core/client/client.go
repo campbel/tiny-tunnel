@@ -60,13 +60,9 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 
 	tunnel.RegisterHttpRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.HttpRequestPayload) {
 		log.Debug("handling http request", "payload", payload)
-		var body *bytes.Reader
-		if payload.Body != nil {
-			body = bytes.NewReader(payload.Body)
-		}
 
 		url_ := options.Target + payload.Path
-		req, err := http.NewRequest(payload.Method, url_, body)
+		req, err := http.NewRequest(payload.Method, url_, bytes.NewReader(payload.Body))
 		if err != nil {
 			log.Error("failed to create HTTP request", "error", err.Error())
 			return
