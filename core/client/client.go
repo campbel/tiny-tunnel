@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 
 	"github.com/campbel/tiny-tunnel/core/protocol"
 	"github.com/campbel/tiny-tunnel/core/shared"
@@ -19,73 +18,54 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type Tunnel struct {
-	options Options
-
-	tunnel     *shared.Tunnel
-	httpClient *http.Client
-	wsSessions *safe.Map[string, *safe.WSConn]
-
-	// manage the client tunnel done channel
-	done   <-chan bool
-	waitMu sync.Mutex
-	isDone bool
-}
-
-func NewTunnel(options Options) *Tunnel {
-	return &Tunnel{
-		options: options,
-		httpClient: &http.Client{
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: options.Insecure},
-			},
+var (
+	httpClient = &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
 		},
-		wsSessions: safe.NewMap[string, *safe.WSConn](),
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
 	}
-}
+)
 
-// Wait blocks until the client tunnel is done
-func (c *Tunnel) Wait() {
-	c.waitMu.Lock()
-	defer c.waitMu.Unlock()
+func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 
-	if c.isDone {
-		return
-	}
-
-	<-c.done
-	c.isDone = true
-}
-
-func (c *Tunnel) Connect(ctx context.Context) error {
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, c.options.URL(), c.options.ServerHeaders)
+	//
+	// Create the client tunnel connection
+	//
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, options.URL(), options.ServerHeaders)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	tunnel := shared.NewTunnel(conn)
 
-	c.tunnel = shared.NewTunnel(conn)
-
-	go func() {
-		<-ctx.Done()
-		c.tunnel.Close()
-	}()
-
-	c.tunnel.RegisterTextHandler(func(tunnel *shared.Tunnel, id string, payload protocol.TextPayload) {
+	//
+	// Register client handlers
+	//
+	tunnel.RegisterTextHandler(func(tunnel *shared.Tunnel, id string, payload protocol.TextPayload) {
 		log.Debug("handling text", "payload", payload)
 		fmt.Println("Received text:", payload.Text)
 	})
 
-	c.tunnel.RegisterHttpRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.HttpRequestPayload) {
+	// HTTP
+	httpClient = &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: options.Insecure},
+		},
+	}
+
+	tunnel.RegisterHttpRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.HttpRequestPayload) {
 		log.Debug("handling http request", "payload", payload)
 		var body *bytes.Reader
 		if payload.Body != nil {
 			body = bytes.NewReader(payload.Body)
 		}
 
-		url_ := c.options.Target + payload.Path
+		url_ := options.Target + payload.Path
 		req, err := http.NewRequest(payload.Method, url_, body)
 		if err != nil {
 			log.Error("failed to create HTTP request", "error", err.Error())
@@ -98,7 +78,7 @@ func (c *Tunnel) Connect(ctx context.Context) error {
 			}
 		}
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
 			return
@@ -119,9 +99,12 @@ func (c *Tunnel) Connect(ctx context.Context) error {
 		}})
 	})
 
-	c.tunnel.RegisterWebsocketCreateRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketCreateRequestPayload) {
+	// Websockets
+	wsSessions := safe.NewMap[string, *safe.WSConn]()
+
+	tunnel.RegisterWebsocketCreateRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketCreateRequestPayload) {
 		log.Debug("handling websocket create request", "payload", payload)
-		wsUrl, err := util.GetWebsocketURL(c.options.Target)
+		wsUrl, err := util.GetWebsocketURL(options.Target)
 		if err != nil {
 			tunnel.SendResponse(protocol.MessageKindWebsocketCreateResponse, id, &protocol.WebsocketCreateResponsePayload{Error: err})
 			return
@@ -136,7 +119,7 @@ func (c *Tunnel) Connect(ctx context.Context) error {
 		conn := safe.NewWSConn(rawConn)
 
 		sessionID := uuid.New().String()
-		if ok := c.wsSessions.SetNX(sessionID, conn); !ok {
+		if ok := wsSessions.SetNX(sessionID, conn); !ok {
 			tunnel.SendResponse(protocol.MessageKindWebsocketCreateResponse, id, &protocol.WebsocketCreateResponsePayload{Error: errors.New("session already exists")})
 			return
 		}
@@ -154,7 +137,7 @@ func (c *Tunnel) Connect(ctx context.Context) error {
 			defer func() {
 				log.Info("closing websocket connection", "session_id", sessionID)
 				conn.Close()
-				c.wsSessions.Delete(sessionID)
+				wsSessions.Delete(sessionID)
 			}()
 
 			for {
@@ -171,9 +154,9 @@ func (c *Tunnel) Connect(ctx context.Context) error {
 		}()
 	})
 
-	c.tunnel.RegisterWebsocketMessageHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketMessagePayload) {
+	tunnel.RegisterWebsocketMessageHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketMessagePayload) {
 		log.Debug("handling websocket message", "payload", payload)
-		conn, ok := c.wsSessions.Get(payload.SessionID)
+		conn, ok := wsSessions.Get(payload.SessionID)
 		if !ok {
 			log.Error("websocket session not found", "session_id", payload.SessionID)
 			return
@@ -183,9 +166,9 @@ func (c *Tunnel) Connect(ctx context.Context) error {
 		}
 	})
 
-	c.tunnel.RegisterWebsocketCloseHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketClosePayload) {
+	tunnel.RegisterWebsocketCloseHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketClosePayload) {
 		log.Debug("handling websocket close", "payload", payload)
-		conn, ok := c.wsSessions.Get(payload.SessionID)
+		conn, ok := wsSessions.Get(payload.SessionID)
 		if !ok {
 			log.Error("websocket session not found", "session_id", payload.SessionID)
 			return
@@ -193,16 +176,8 @@ func (c *Tunnel) Connect(ctx context.Context) error {
 		if err := conn.Close(); err != nil {
 			log.Error("failed to close websocket connection", "error", err.Error(), "payload", payload)
 		}
-		c.wsSessions.Delete(payload.SessionID)
+		wsSessions.Delete(payload.SessionID)
 	})
 
-	doneChan := make(chan bool)
-	go func() {
-		c.tunnel.Listen(ctx)
-		doneChan <- true
-	}()
-
-	c.done = doneChan
-
-	return nil
+	return tunnel, nil
 }

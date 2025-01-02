@@ -1,4 +1,4 @@
-package server
+package server_test
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/campbel/tiny-tunnel/core/client"
+	"github.com/campbel/tiny-tunnel/core/server"
 	"github.com/campbel/tiny-tunnel/internal/util"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -20,7 +21,7 @@ import (
 func TestServerRoot(t *testing.T) {
 	assert := assert.New(t)
 
-	server := httptest.NewServer(NewHandler(Options{
+	server := httptest.NewServer(server.NewHandler(server.Options{
 		Hostname: "example.com",
 	}))
 	defer server.Close()
@@ -42,7 +43,7 @@ func TestServerRoot(t *testing.T) {
 func TestServerRegister(t *testing.T) {
 	assert := assert.New(t)
 
-	server := httptest.NewServer(NewHandler(Options{
+	server := httptest.NewServer(server.NewHandler(server.Options{
 		Hostname: "example.com",
 	}))
 	defer server.Close()
@@ -69,7 +70,7 @@ func TestServerConnectWithClient(t *testing.T) {
 	}))
 	defer appServer.Close()
 
-	server := httptest.NewServer(NewHandler(Options{
+	server := httptest.NewServer(server.NewHandler(server.Options{
 		Hostname: "example.com",
 	}))
 	defer server.Close()
@@ -81,7 +82,7 @@ func TestServerConnectWithClient(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := client.NewTunnel(client.Options{
+	client, err := client.NewTunnel(ctx, client.Options{
 		Name:       "test",
 		ServerHost: serverURL.Hostname(),
 		ServerPort: serverURL.Port(),
@@ -89,10 +90,11 @@ func TestServerConnectWithClient(t *testing.T) {
 		Target:     appServer.URL,
 	})
 
-	err = client.Connect(ctx)
 	if !assert.NoError(err) {
 		return
 	}
+
+	go client.Listen(ctx)
 
 	request, err := http.NewRequest("GET", server.URL, nil)
 	if !assert.NoError(err) {
@@ -120,7 +122,7 @@ func TestServerTunnel(t *testing.T) {
 
 	serverCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	serverTunnelChan := make(chan *ServerTunnel)
+	serverTunnelChan := make(chan *server.Tunnel)
 	tunnelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upgrader := websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
@@ -133,9 +135,9 @@ func TestServerTunnel(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		serverTunnel := NewServerTunnel(conn)
+		serverTunnel := server.NewTunnel(conn)
 		serverTunnelChan <- serverTunnel
-		serverTunnel.Start(serverCtx)
+		serverTunnel.Listen(serverCtx)
 	}))
 	defer tunnelServer.Close()
 
@@ -152,7 +154,7 @@ func TestServerTunnel(t *testing.T) {
 
 	clientCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	clientTunnel := client.NewTunnel(client.Options{
+	client, err := client.NewTunnel(clientCtx, client.Options{
 		Name:       "test",
 		ServerHost: strings.Split(serverURL.Host, ":")[0],
 		ServerPort: serverURL.Port(),
@@ -160,7 +162,9 @@ func TestServerTunnel(t *testing.T) {
 		Target:     appServer.URL,
 	})
 
-	assert.NoError(clientTunnel.Connect(clientCtx))
+	assert.NoError(err)
+
+	go client.Listen(clientCtx)
 
 	serverTunnel := <-serverTunnelChan
 

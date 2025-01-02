@@ -56,7 +56,8 @@ func TestE2E(t *testing.T) {
 
 	serverURL, _ := url.Parse(server.URL)
 
-	client := client.NewTunnel(client.Options{
+	ctx, cancel := context.WithCancel(context.Background())
+	client, err := client.NewTunnel(ctx, client.Options{
 		Name:       "test",
 		ServerHost: serverURL.Hostname(),
 		ServerPort: serverURL.Port(),
@@ -64,9 +65,9 @@ func TestE2E(t *testing.T) {
 		Target:     appServer.URL,
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	assert.NoError(err)
 
-	assert.NoError(client.Connect(ctx))
+	go client.Listen(ctx)
 
 	t.Run("HTTP Request #1", func(t *testing.T) {
 		for range 5 {
@@ -108,5 +109,4 @@ func TestE2E(t *testing.T) {
 	})
 
 	cancel()
-	client.Wait()
 }

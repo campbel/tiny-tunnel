@@ -42,7 +42,6 @@ var startCmd = &cobra.Command{
 			TargetHeaders:     convertMapToHeaders(targetHeaders),
 			ServerHeaders:     convertMapToHeaders(serverHeaders),
 		}
-		clientTunnel := client.NewTunnel(options)
 
 		log.Info("connecting...")
 	LOOP:
@@ -51,13 +50,14 @@ var startCmd = &cobra.Command{
 			case <-cmd.Context().Done():
 				break LOOP
 			default:
-				if err := clientTunnel.Connect(cmd.Context()); err != nil {
+				tunnel, err := client.NewTunnel(cmd.Context(), options)
+				if err != nil {
 					log.Error("error connecting to tunnel", "err", err)
 					time.Sleep(3 * time.Second)
 					continue
 				}
 				log.Info("connected", "address", getTunnelAddress(options))
-				clientTunnel.Wait()
+				tunnel.Listen(cmd.Context())
 			}
 		}
 

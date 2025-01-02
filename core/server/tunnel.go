@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -14,104 +13,16 @@ import (
 	"github.com/campbel/tiny-tunnel/core/protocol"
 	"github.com/campbel/tiny-tunnel/core/shared"
 
-	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
 
-///
-/// Server Handler
-///
-
-type Handler struct {
-	options  Options
-	upgrader websocket.Upgrader
-	tunnels  *safe.Map[string, *ServerTunnel]
-}
-
-func NewHandler(options Options) http.Handler {
-	server := &Handler{
-		options: options,
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
-		},
-		tunnels: safe.NewMap[string, *ServerTunnel](),
-	}
-
-	router := mux.NewRouter()
-	router.Host(fmt.Sprintf("{tunnel:[a-z]+}.%s", options.Hostname)).HandlerFunc(server.HandleTunnelRequest)
-	router.HandleFunc("/register", server.HandleRegister)
-	router.HandleFunc("/", server.HandleRoot)
-
-	return router
-}
-
-func (s *Handler) HandleRoot(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("X-TT-Tunnel") != "" {
-		s.HandleTunnelRequest(w, r)
-		return
-	}
-
-	fmt.Fprint(w, "Welcome to Tiny Tunnel. See github.com/campbel/tiny-tunnel for more info.")
-}
-
-func (s *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
-	name := r.FormValue("name")
-	if name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
-		return
-	}
-
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	tunnel := NewServerTunnel(conn)
-	if !s.tunnels.SetNX(name, tunnel) {
-		http.Error(w, "name is already used", http.StatusBadRequest)
-		return
-	}
-	log.Info("registered tunnel", "name", name)
-
-	tunnel.Start(r.Context())
-
-	s.tunnels.Delete(name)
-	log.Info("unregistered tunnel", "name", name)
-}
-
-func (s *Handler) HandleTunnelRequest(w http.ResponseWriter, r *http.Request) {
-	tunnelID := mux.Vars(r)["tunnel"]
-	if tunnelID == "" {
-		tunnelID = r.Header.Get("X-TT-Tunnel")
-	}
-
-	if tunnelID == "" {
-		http.Error(w, "tunnel name not provided", http.StatusBadRequest)
-		return
-	}
-
-	tunnel, ok := s.tunnels.Get(tunnelID)
-	if !ok {
-		http.Error(w, "tunnel not found", http.StatusNotFound)
-		return
-	}
-	tunnel.HandleHttpRequest(w, r)
-}
-
-///
-/// Server Tunnel
-///
-
-type ServerTunnel struct {
+type Tunnel struct {
 	tunnel         *shared.Tunnel
 	websocketConns *safe.Map[string, *safe.WSConn]
 }
 
-func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
-	server := &ServerTunnel{
+func NewTunnel(conn *websocket.Conn) *Tunnel {
+	server := &Tunnel{
 		tunnel:         shared.NewTunnel(conn),
 		websocketConns: safe.NewMap[string, *safe.WSConn](),
 	}
@@ -143,15 +54,15 @@ func NewServerTunnel(conn *websocket.Conn) *ServerTunnel {
 	return server
 }
 
-func (s *ServerTunnel) Start(ctx context.Context) {
+func (s *Tunnel) Listen(ctx context.Context) {
 	s.tunnel.Listen(ctx)
 }
 
-func (s *ServerTunnel) Stop() {
+func (s *Tunnel) Close() {
 	s.tunnel.Close()
 }
 
-func (s *ServerTunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
+func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Upgrade") == "websocket" {
 		s.HandleWebsocketRequest(w, r)
 		return
@@ -198,7 +109,7 @@ func (s *ServerTunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request)
 	w.Write(responsePayload.Response.Body)
 }
 
-func (s *ServerTunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) {
+func (s *Tunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) {
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true
