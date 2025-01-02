@@ -13,6 +13,9 @@ const (
 	MessageKindWebsocketCreateResponse
 	MessageKindWebsocketMessage
 	MessageKindWebsocketClose
+	MessageKindSSERequest
+	MessageKindSSEMessage
+	MessageKindSSEClose
 )
 
 type Message struct {
@@ -101,4 +104,16 @@ type WebsocketMessage struct {
 
 type WebsocketCloseMessage struct {
 	SessionID string `json:"session_id,omitempty"`
+}
+
+type SSERequestPayload struct {
+	Path    string      `json:"path,omitempty"`
+	Headers http.Header `json:"headers,omitempty"`
+}
+
+type SSEMessagePayload struct {
+	Data string `json:"data,omitempty"`
+}
+
+type SSEClosePayload struct {
 }

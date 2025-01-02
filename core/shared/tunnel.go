@@ -159,7 +159,7 @@ func (t *Tunnel) registerHandler(kind int, handler func(tunnel *Tunnel, id strin
 	t.handlerRegistry[kind] = handler
 }
 
-func HandlerFunc[T any](handler func(tunnel *Tunnel, id string, payload T)) func(tunnel *Tunnel, id string, payload []byte) {
+func handlerFunc[T any](handler func(tunnel *Tunnel, id string, payload T)) func(tunnel *Tunnel, id string, payload []byte) {
 	return func(tunnel *Tunnel, id string, payload []byte) {
 		var tPayload T
 		if err := json.Unmarshal(payload, &tPayload); err != nil {
@@ -171,21 +171,33 @@ func HandlerFunc[T any](handler func(tunnel *Tunnel, id string, payload T)) func
 }
 
 func (t *Tunnel) RegisterTextHandler(handler func(tunnel *Tunnel, id string, payload protocol.TextPayload)) {
-	t.registerHandler(protocol.MessageKindText, HandlerFunc(handler))
+	t.registerHandler(protocol.MessageKindText, handlerFunc(handler))
 }
 
 func (t *Tunnel) RegisterHttpRequestHandler(handler func(tunnel *Tunnel, id string, payload protocol.HttpRequestPayload)) {
-	t.registerHandler(protocol.MessageKindHttpRequest, HandlerFunc(handler))
+	t.registerHandler(protocol.MessageKindHttpRequest, handlerFunc(handler))
 }
 
 func (t *Tunnel) RegisterWebsocketCreateRequestHandler(handler func(tunnel *Tunnel, id string, payload protocol.WebsocketCreateRequestPayload)) {
-	t.registerHandler(protocol.MessageKindWebsocketCreateRequest, HandlerFunc(handler))
+	t.registerHandler(protocol.MessageKindWebsocketCreateRequest, handlerFunc(handler))
 }
 
 func (t *Tunnel) RegisterWebsocketMessageHandler(handler func(tunnel *Tunnel, id string, payload protocol.WebsocketMessagePayload)) {
-	t.registerHandler(protocol.MessageKindWebsocketMessage, HandlerFunc(handler))
+	t.registerHandler(protocol.MessageKindWebsocketMessage, handlerFunc(handler))
 }
 
 func (t *Tunnel) RegisterWebsocketCloseHandler(handler func(tunnel *Tunnel, id string, payload protocol.WebsocketClosePayload)) {
-	t.registerHandler(protocol.MessageKindWebsocketClose, HandlerFunc(handler))
+	t.registerHandler(protocol.MessageKindWebsocketClose, handlerFunc(handler))
+}
+
+func (t *Tunnel) RegisterSSERequestHandler(handler func(tunnel *Tunnel, id string, payload protocol.SSERequestPayload)) {
+	t.registerHandler(protocol.MessageKindSSERequest, handlerFunc(handler))
+}
+
+func (t *Tunnel) RegisterSSEMessageHandler(handler func(tunnel *Tunnel, id string, payload protocol.SSEMessagePayload)) {
+	t.registerHandler(protocol.MessageKindSSEMessage, handlerFunc(handler))
+}
+
+func (t *Tunnel) RegisterSSECloseHandler(handler func(tunnel *Tunnel, id string, payload protocol.SSEClosePayload)) {
+	t.registerHandler(protocol.MessageKindSSEClose, handlerFunc(handler))
 }

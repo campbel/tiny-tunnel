@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -173,6 +174,35 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 			log.Error("failed to close websocket connection", "error", err.Error(), "payload", payload)
 		}
 		wsSessions.Delete(payload.SessionID)
+	})
+
+	// SSE
+
+	tunnel.RegisterSSERequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.SSERequestPayload) {
+		req, err := http.NewRequest(http.MethodGet, options.Target+payload.Path, nil)
+		if err != nil {
+			log.Error("failed to create SSE request", "error", err.Error())
+			return
+		}
+		for k, v := range payload.Headers {
+			for _, vv := range v {
+				req.Header.Add(k, vv)
+			}
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			log.Error("failed to send SSE request", "error", err.Error())
+			return
+		}
+
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{Data: scanner.Text()})
+		}
+
+		tunnel.SendResponse(protocol.MessageKindSSEClose, id, &protocol.SSEClosePayload{})
+		defer resp.Body.Close()
 	})
 
 	return tunnel, nil
