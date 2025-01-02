@@ -99,7 +99,7 @@ func TestClientServerSentEvents(t *testing.T) {
 				writeEvent(w, Event{
 					ID:   fmt.Sprintf("%d", i),
 					Type: "message",
-					Data: fmt.Sprintf("%d", i),
+					Data: fmt.Sprintf("foo %d", i),
 				})
 			}
 		}
@@ -131,7 +131,7 @@ LOOP:
 		}
 	}
 
-	assert.Equal([]string{"id: 0", "event: message", "data: 0", "", "id: 1", "event: message", "data: 1", "", "id: 2", "event: message", "data: 2", ""}, messages)
+	assert.Equal([]string{"id: 0", "event: message", "data: foo 0", "", "id: 1", "event: message", "data: foo 1", "", "id: 2", "event: message", "data: foo 2", ""}, messages)
 }
 
 func setupTestScenario(t *testing.T, ctx context.Context, handler func(w http.ResponseWriter, r *http.Request)) (*shared.Tunnel, *websocket.Conn, chan protocol.Message) {
