@@ -45,8 +45,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 	// Register client handlers
 	//
 	tunnel.RegisterTextHandler(func(tunnel *shared.Tunnel, id string, payload protocol.TextPayload) {
-		log.Debug("handling text", "payload", payload)
-		fmt.Println("Received text:", payload.Text)
+		fmt.Fprintf(options.Output(), "%s\n", payload.Text)
 	})
 
 	// HTTP

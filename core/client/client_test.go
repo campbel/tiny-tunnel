@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -56,26 +57,73 @@ func TestClientHttpRequest(t *testing.T) {
 	assert.Equal(resp.Response.Status, 200)
 }
 
-type Event struct {
-	ID   string
-	Type string
-	Data string
-}
+func TestClientWebsocket(t *testing.T) {
+	assert := assert.New(t)
 
-func writeEvent(w http.ResponseWriter, event Event) {
-	// Write event fields according to SSE specification
-	if event.ID != "" {
-		fmt.Fprintf(w, "id: %s\n", event.ID)
-	}
-	if event.Type != "" {
-		fmt.Fprintf(w, "event: %s\n", event.Type)
-	}
-	fmt.Fprintf(w, "data: %s\n\n", event.Data)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Flush the response writer
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
+	_, conn, responseChan := setupTestScenario(t, ctx, func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				return true
+			},
+		}
+
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		for {
+			mt, message, err := conn.ReadMessage()
+			if err != nil {
+				break
+			}
+			slices.Reverse(message)
+			if err := conn.WriteMessage(mt, message); err != nil {
+				break
+			}
+		}
+		conn.Close()
+	})
+
+	conn.WriteJSON(protocol.Message{
+		ID:   uuid.New().String(),
+		Kind: protocol.MessageKindWebsocketCreateRequest,
+		Payload: JSON(protocol.WebsocketCreateRequestPayload{
+			Path: "/",
+		}),
+	})
+
+	response := <-responseChan
+	assert.Equal(response.Kind, protocol.MessageKindWebsocketCreateResponse)
+	var resp protocol.WebsocketCreateResponsePayload
+	err := json.Unmarshal(response.Payload, &resp)
+	assert.NoError(err)
+	assert.NotEmpty(resp.SessionID)
+	assert.NoError(resp.Error)
+	assert.Equal(resp.HttpResponse.Response.Status, 101)
+
+	conn.WriteJSON(protocol.Message{
+		ID:   uuid.New().String(),
+		Kind: protocol.MessageKindWebsocketMessage,
+		Payload: JSON(protocol.WebsocketMessagePayload{
+			SessionID: resp.SessionID,
+			Kind:      1,
+			Data:      []byte("Hello world!"),
+		}),
+	})
+
+	response = <-responseChan
+	assert.Equal(response.Kind, protocol.MessageKindWebsocketMessage)
+	var message protocol.WebsocketMessagePayload
+	err = json.Unmarshal(response.Payload, &message)
+	assert.NoError(err)
+	assert.Equal(message.SessionID, resp.SessionID)
+	assert.Equal(message.Kind, 1)
+	assert.Equal("!dlrow olleH", string(message.Data))
 }
 
 func TestClientServerSentEvents(t *testing.T) {
@@ -200,4 +248,26 @@ func JSON(v any) []byte {
 		panic(err)
 	}
 	return b
+}
+
+type Event struct {
+	ID   string
+	Type string
+	Data string
+}
+
+func writeEvent(w http.ResponseWriter, event Event) {
+	// Write event fields according to SSE specification
+	if event.ID != "" {
+		fmt.Fprintf(w, "id: %s\n", event.ID)
+	}
+	if event.Type != "" {
+		fmt.Fprintf(w, "event: %s\n", event.Type)
+	}
+	fmt.Fprintf(w, "data: %s\n\n", event.Data)
+
+	// Flush the response writer
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 }

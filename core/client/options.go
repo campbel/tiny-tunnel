@@ -2,8 +2,10 @@ package client
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"os"
 )
 
 type Options struct {
@@ -16,6 +18,8 @@ type Options struct {
 	ReconnectAttempts int
 	TargetHeaders     http.Header
 	ServerHeaders     http.Header
+
+	OutputWriter io.Writer
 }
 
 func (c Options) Origin() string {
@@ -38,6 +42,13 @@ func (c Options) SchemeWS() string {
 		return "ws"
 	}
 	return "wss"
+}
+
+func (c Options) Output() io.Writer {
+	if c.OutputWriter == nil {
+		return os.Stdout
+	}
+	return c.OutputWriter
 }
 
 func (c Options) Valid() error {
