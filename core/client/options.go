@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+
+	"github.com/campbel/tiny-tunnel/core/stats"
 )
 
 type Options struct {
@@ -20,6 +22,8 @@ type Options struct {
 	ServerHeaders     http.Header
 
 	OutputWriter io.Writer
+
+	Tracker stats.Provider
 }
 
 func (c Options) Origin() string {

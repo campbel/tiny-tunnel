@@ -14,6 +14,7 @@ import (
 	"github.com/campbel/tiny-tunnel/core/client"
 	"github.com/campbel/tiny-tunnel/core/protocol"
 	"github.com/campbel/tiny-tunnel/core/shared"
+	"github.com/campbel/tiny-tunnel/core/stats"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
@@ -26,7 +27,7 @@ func TestClientHttpRequest(t *testing.T) {
 	defer cancel()
 
 	requestChan := make(chan *http.Request)
-	_, conn, responseChan := setupTestScenario(t, ctx, func(w http.ResponseWriter, r *http.Request) {
+	_, conn, responseChan, tracker := setupTestScenario(t, ctx, func(w http.ResponseWriter, r *http.Request) {
 		requestChan <- r
 	})
 
@@ -55,6 +56,8 @@ func TestClientHttpRequest(t *testing.T) {
 	err := json.Unmarshal(response.Payload, &resp)
 	assert.NoError(err)
 	assert.Equal(resp.Response.Status, 200)
+
+	assert.Equal(tracker.GetHttpStats().TotalRequests, 1)
 }
 
 func TestClientWebsocket(t *testing.T) {
@@ -63,7 +66,7 @@ func TestClientWebsocket(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, conn, responseChan := setupTestScenario(t, ctx, func(w http.ResponseWriter, r *http.Request) {
+	_, conn, responseChan, tracker := setupTestScenario(t, ctx, func(w http.ResponseWriter, r *http.Request) {
 		upgrader := websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true
@@ -124,6 +127,22 @@ func TestClientWebsocket(t *testing.T) {
 	assert.Equal(message.SessionID, resp.SessionID)
 	assert.Equal(message.Kind, 1)
 	assert.Equal("!dlrow olleH", string(message.Data))
+
+	conn.WriteJSON(protocol.Message{
+		ID:   uuid.New().String(),
+		Kind: protocol.MessageKindWebsocketClose,
+		Payload: JSON(protocol.WebsocketClosePayload{
+			SessionID: resp.SessionID,
+		}),
+	})
+
+	// hack to wait for the websocket to close
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(1, tracker.GetWebsocketStats().TotalConnections)
+	assert.Equal(0, tracker.GetWebsocketStats().ActiveConnections)
+	assert.Equal(1, tracker.GetWebsocketStats().TotalMessagesSent)
+	assert.Equal(1, tracker.GetWebsocketStats().TotalMessagesRecv)
 }
 
 func TestClientServerSentEvents(t *testing.T) {
@@ -132,7 +151,7 @@ func TestClientServerSentEvents(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, conn, responseChan := setupTestScenario(t, ctx, func(w http.ResponseWriter, r *http.Request) {
+	_, conn, responseChan, tracker := setupTestScenario(t, ctx, func(w http.ResponseWriter, r *http.Request) {
 		// prepare the header
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -180,9 +199,12 @@ LOOP:
 	}
 
 	assert.Equal([]string{"id: 0", "event: message", "data: foo 0", "", "id: 1", "event: message", "data: foo 1", "", "id: 2", "event: message", "data: foo 2", ""}, messages)
+	assert.Equal(1, tracker.GetSseStats().TotalConnections)
+	assert.Equal(0, tracker.GetSseStats().ActiveConnections)
+	assert.Equal(3, tracker.GetSseStats().TotalMessagesRecv)
 }
 
-func setupTestScenario(t *testing.T, ctx context.Context, handler func(w http.ResponseWriter, r *http.Request)) (*shared.Tunnel, *websocket.Conn, chan protocol.Message) {
+func setupTestScenario(t *testing.T, ctx context.Context, handler func(w http.ResponseWriter, r *http.Request)) (*shared.Tunnel, *websocket.Conn, chan protocol.Message, *stats.Tracker) {
 	t.Helper()
 
 	// Mock tunnel Server
@@ -228,18 +250,20 @@ func setupTestScenario(t *testing.T, ctx context.Context, handler func(w http.Re
 	if err != nil {
 		t.Fatal(err)
 	}
+	tracker := new(stats.Tracker)
 	client, err := client.NewTunnel(ctx, client.Options{
 		ServerHost: url.Hostname(),
 		ServerPort: url.Port(),
 		Insecure:   true,
 		Target:     appServer.URL,
+		Tracker:    tracker,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	go client.Listen(ctx)
 
-	return client, conn, responseChan
+	return client, conn, responseChan, tracker
 }
 
 func JSON(v any) []byte {

@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/campbel/tiny-tunnel/core/protocol"
 	"github.com/campbel/tiny-tunnel/core/shared"
+	"github.com/campbel/tiny-tunnel/core/stats"
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/campbel/tiny-tunnel/internal/safe"
 	"github.com/campbel/tiny-tunnel/internal/util"
@@ -31,6 +33,10 @@ var (
 )
 
 func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
+	tracker := options.Tracker
+	if tracker == nil {
+		tracker = new(stats.Tracker)
+	}
 
 	//
 	// Create the client tunnel connection
@@ -48,7 +54,12 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		fmt.Fprintf(options.Output(), "%s\n", payload.Text)
 	})
 
+	//
 	// HTTP
+	//
+	// Requests are sent to the target and response send back to the server.
+	// Each request is 1:1 to a response which makes this fairly trivial.
+	//
 	httpClient = &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -60,6 +71,8 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 
 	tunnel.RegisterHttpRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.HttpRequestPayload) {
 		log.Debug("handling http request", "payload", payload)
+
+		tracker.IncrementHttpRequest()
 
 		url_ := options.Target + payload.Path
 		req, err := http.NewRequest(payload.Method, url_, bytes.NewReader(payload.Body))
@@ -76,6 +89,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
+			tracker.IncrementHttpResponse()
 			tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
 			return
 		}
@@ -83,11 +97,13 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
+			tracker.IncrementHttpResponse()
 			tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
 			return
 		}
 		log.Debug("sending response", "status", resp.StatusCode, "headers", resp.Header)
 
+		tracker.IncrementHttpResponse()
 		tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Response: protocol.HttpResponse{
 			Status:  resp.StatusCode,
 			Headers: resp.Header,
@@ -95,7 +111,13 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		}})
 	})
 
+	//
 	// Websockets
+	//
+	// For websockets, we must establish connections and store a reference to them in the session map.
+	// Each connection is given a session ID as its identifier and passed back to the server in the response.
+	// The server will use this ID to send messages to the client in the future.
+	//
 	wsSessions := safe.NewMap[string, *safe.WSConn]()
 
 	tunnel.RegisterWebsocketCreateRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketCreateRequestPayload) {
@@ -113,6 +135,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		}
 
 		conn := safe.NewWSConn(rawConn)
+		tracker.IncrementWebsocketConnection()
 
 		sessionID := uuid.New().String()
 		if ok := wsSessions.SetNX(sessionID, conn); !ok {
@@ -134,6 +157,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 				log.Info("closing websocket connection", "session_id", sessionID)
 				conn.Close()
 				wsSessions.Delete(sessionID)
+				tracker.DecrementWebsocketConnection()
 			}()
 
 			for {
@@ -142,6 +166,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 					log.Error("exiting websocket read loop", "error", err.Error(), "session_id", sessionID)
 					break
 				}
+				tracker.IncrementWebsocketMessageRecv()
 				log.Debug("read ws message", "session_id", sessionID, "kind", mt, "data", string(data))
 				if err := tunnel.Send(protocol.MessageKindWebsocketMessage, &protocol.WebsocketMessagePayload{SessionID: sessionID, Kind: mt, Data: data}); err != nil {
 					log.Error("failed to send websocket message", "error", err.Error())
@@ -160,6 +185,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		if err := conn.WriteMessage(payload.Kind, payload.Data); err != nil {
 			log.Error("failed to write websocket message", "error", err.Error())
 		}
+		tracker.IncrementWebsocketMessageSent()
 	})
 
 	tunnel.RegisterWebsocketCloseHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketClosePayload) {
@@ -175,9 +201,17 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		wsSessions.Delete(payload.SessionID)
 	})
 
-	// SSE
-
+	//
+	// Server-Sent Events
+	//
+	// SSE is more complex than HTTP, but simpler than websockets. We must establish the connection,
+	// then read the data and send it back to the server until a connection close request is received
+	// or until the connection is closed by the server.
+	//
 	tunnel.RegisterSSERequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.SSERequestPayload) {
+		tracker.IncrementSseConnection()
+		defer tracker.DecrementSseConnection()
+
 		req, err := http.NewRequest(http.MethodGet, options.Target+payload.Path, nil)
 		if err != nil {
 			log.Error("failed to create SSE request", "error", err.Error())
@@ -197,7 +231,11 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
-			tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{Data: scanner.Text()})
+			text := scanner.Text()
+			if strings.HasPrefix(text, "data:") {
+				tracker.IncrementSseMessageRecv()
+			}
+			tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{Data: text})
 		}
 
 		tunnel.SendResponse(protocol.MessageKindSSEClose, id, &protocol.SSEClosePayload{})
