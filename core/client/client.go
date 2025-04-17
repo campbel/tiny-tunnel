@@ -64,6 +64,13 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 	// Register client handlers
 	//
 	tunnel.RegisterTextHandler(func(tunnel *shared.Tunnel, id string, payload protocol.TextPayload) {
+		if payload.Text == "ping" {
+			log.Debug("received ping", "id", id)
+			tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
+				Text: "pong",
+			})
+			return
+		}
 		fmt.Fprintf(options.Output(), "%s\n", payload.Text)
 	})
 
@@ -281,7 +288,7 @@ func TestAuth(options Options) (map[string]any, error) {
 			return nil, fmt.Errorf("failed to parse server URL: %w", err)
 		}
 	}
-	
+
 	// Build the auth test URL
 	authTestURL, err := url.JoinPath(serverURL.String(), "/api/auth-test")
 	if err != nil {

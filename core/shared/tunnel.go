@@ -42,6 +42,12 @@ func (t *Tunnel) Close() {
 	t.close(false)
 }
 
+func (t *Tunnel) IsClosed() bool {
+	t.closeMu.Lock()
+	defer t.closeMu.Unlock()
+	return t.isClosed
+}
+
 func (t *Tunnel) SetCloseHandler(handler func()) {
 	t.closeHandler = handler
 }

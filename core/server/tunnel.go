@@ -37,6 +37,26 @@ func NewTunnel(conn *websocket.Conn, options TunnelOptions) *Tunnel {
 		})
 	}
 
+	ticker := time.NewTicker(15 * time.Second)
+	go func() {
+		for range ticker.C {
+			if server.tunnel.IsClosed() {
+				return
+			}
+			server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
+				Text: "ping",
+			})
+		}
+	}()
+
+	server.tunnel.RegisterTextHandler(func(tunnel *shared.Tunnel, id string, payload protocol.TextPayload) {
+		if payload.Text == "pong" {
+			log.Debug("received pong", "id", id)
+			return
+		}
+		log.Debug("handling text message", "payload", payload)
+	})
+
 	server.tunnel.RegisterWebsocketMessageHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketMessagePayload) {
 		log.Debug("handling websocket message", "payload", payload)
 		conn, ok := server.websocketConns.Get(payload.SessionID)
