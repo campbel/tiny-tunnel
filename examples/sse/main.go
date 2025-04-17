@@ -54,7 +54,7 @@ var dataChans = safe.NewMap[string, chan string]()
 var sseHandlers = safe.NewMap[string, SSEHandler]()
 
 func main() {
-	fmt.Println("Starting server on port 8080")
+	fmt.Println("starting up...")
 
 	homeTemplate := template.Must(template.New("home").Parse(mustReadFile("templates/home.html")))
 	sseHandlers.SetNX("/", func(ctx context.Context, ch chan string) {
@@ -135,5 +135,9 @@ func main() {
 
 	http.Handle("/components/", http.StripPrefix("/components/", http.FileServer(http.Dir("components"))))
 
-	http.ListenAndServe(":8080", nil)
+	fmt.Println("listening on port 3000")
+	err := http.ListenAndServe(":3000", nil)
+	if err != nil {
+		panic(err)
+	}
 }

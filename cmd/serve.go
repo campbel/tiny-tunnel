@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	port     string
-	hostname string
+	port       string
+	hostname   string
+	enableAuth bool
 )
 
 // serveCmd represents the serve command
@@ -29,7 +30,8 @@ var serveCmd = &cobra.Command{
 		ctx := cmd.Context()
 
 		router := server.NewHandler(server.Options{
-			Hostname: hostname,
+			Hostname:   hostname,
+			EnableAuth: enableAuth,
 		})
 
 		server := &http.Server{
@@ -63,4 +65,5 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 	serveCmd.Flags().StringVarP(&port, "port", "p", "8080", "Port to listen on")
 	serveCmd.Flags().StringVarP(&hostname, "hostname", "", "localhost", "Hostname to listen on")
+	serveCmd.Flags().BoolVarP(&enableAuth, "enable-auth", "", false, "Enable authentication")
 }

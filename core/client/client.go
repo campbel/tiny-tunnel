@@ -41,7 +41,18 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 	//
 	// Create the client tunnel connection
 	//
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, options.URL(), options.ServerHeaders)
+	// Prepare headers
+	headers := options.ServerHeaders
+	if headers == nil {
+		headers = http.Header{}
+	}
+	
+	// Add auth token if available
+	if token := options.GetResolvedToken(); token != "" {
+		headers.Set("X-Auth-Token", token)
+	}
+	
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, options.URL(), headers)
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +97,9 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 				req.Header.Add(k, vv)
 			}
 		}
+		
+		// We don't need to add token to HTTP requests as tunnel access doesn't require auth
+		// The token is only needed for /register endpoint which is handled during websocket connection
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
@@ -128,7 +142,13 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 			return
 		}
 
-		rawConn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsUrl.String()+payload.Path, http.Header{"Origin": []string{payload.Origin}})
+		// Prepare headers for the WebSocket connection
+		wsHeaders := http.Header{"Origin": []string{payload.Origin}}
+		
+		// We don't need to add token to WebSocket connections as tunnel access doesn't require auth
+		// The token is only needed for /register endpoint which is handled during initial websocket connection
+		
+		rawConn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsUrl.String()+payload.Path, wsHeaders)
 		if err != nil {
 			tunnel.SendResponse(protocol.MessageKindWebsocketCreateResponse, id, &protocol.WebsocketCreateResponsePayload{Error: err})
 			return
@@ -222,6 +242,9 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 				req.Header.Add(k, vv)
 			}
 		}
+		
+		// We don't need to add token to SSE requests as tunnel access doesn't require auth
+		// The token is only needed for /register endpoint which is handled during initial websocket connection
 
 		resp, err := httpClient.Do(req)
 		if err != nil {

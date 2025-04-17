@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tiny Tunnel Authentication</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Tiny Tunnel Authentication</h1>
+        <div class="card">
+            <h2>Your Authentication Token</h2>
+            <div id="token-display">
+                <div class="token-box">
+                    <span id="token-value">Generating token...</span>
+                    <button id="copy-token">Copy</button>
+                </div>
+                <div class="token-info">
+                    <p>Expires: <span id="token-expires">-</span></p>
+                    <p>Email: <span id="token-email">-</span></p>
+                </div>
+                <div class="login-instructions">
+                    <h3>Complete Login</h3>
+                    <p>Go back to your terminal and paste the token to complete the login process.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>

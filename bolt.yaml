@@ -1,0 +1,38 @@
+---
+# Bolt Configuration File
+# Created by Dutchie (https://github.com/GetDutchie/bolt)
+# Documentation at https://dutchie.roadie.so/docs/default/component/bolt/
+
+# Tool versions to install, see options with 'bolt tools ls'
+tools: [{ golang: "1.23.4" }, { nodejs: "20.14.0" }]
+# Load environment variables from .env files
+dotenv: []
+# Setup commands to run during 'bolt up'
+up:
+  - sh: command -v overmind || brew install overmind
+    platforms: [darwin]
+  - go install github.com/air-verse/air@latest
+  - npm install -g bun
+  - cd examples/nextjs-example && bun install
+# Custom commands, run like 'bolt dev'
+cmds:
+  # Start the development server
+  dev:
+    desc: "Start the development server"
+    env:
+      TINY_TUNNEL_JWT_SECRET: super-secret-key
+    steps: ["overmind start"]
+  start:
+    desc: "Start the development server"
+    steps:
+      - air start --insecure=true --name example --target http://localhost:3000
+
+  login:
+    desc: "Login to the development server"
+    steps:
+      - go run main.go login http://localhost:8080
+
+  test:
+    desc: "Run the tests"
+    steps:
+      - go test -v ./...
