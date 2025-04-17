@@ -81,7 +81,7 @@ var startCmd = &cobra.Command{
 					time.Sleep(3 * time.Second)
 					continue
 				}
-				log.Info("connected", "address", getTunnelAddress(options))
+				log.Info("connected", "server", options.ServerHost, "port", options.ServerPort, "insecure", options.Insecure)
 				tunnel.Listen(cmd.Context())
 			}
 		}
