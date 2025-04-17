@@ -46,7 +46,7 @@ func NewHandler(options Options) http.Handler {
 	}
 
 	router := mux.NewRouter()
-	router.Host(fmt.Sprintf("{tunnel:[a-z]+}.%s", options.Hostname)).HandlerFunc(server.HandleTunnelRequest)
+	router.Host(fmt.Sprintf("{tunnel:[a-z0-9-]+}.%s", options.Hostname)).HandlerFunc(server.HandleTunnelRequest)
 
 	if options.EnableAuth {
 		// Wrap /register with token auth middleware
