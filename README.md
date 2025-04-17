@@ -28,29 +28,15 @@ docker run -it --rm ghcr.io/campbel/tiny-tunnel:latest --help
 
 ## Quick Start
 
-### Server Setup
-
-To start a tunnel server:
-
-```bash
-tiny-tunnel serve
-```
-
-By default, this starts the server on port 8080. You can specify a different port:
-
-```bash
-tiny-tunnel serve --port 9000
-```
-
 ### Client Authentication
 
 Before creating tunnels, you need to authenticate with the server:
 
 ```bash
-tiny-tunnel login localhost:8080
+tiny-tunnel login example.com
 ```
 
-This will open a browser window where you can generate and copy an authentication token. The token will be stored in your configuration.
+This will open a browser window where you can generate and copy an authentication token. The token will be stored in the configuration at `~/.config/tiny-tunnel/auth.json`
 
 ### Creating a Tunnel
 
@@ -64,39 +50,11 @@ This creates a tunnel named "myapp" that forwards requests to your local service
 
 ### Accessing Your Service
 
-Once your tunnel is running, you can access your service at:
+Once your tunnel is running, you can access your service like:
 
 ```
-http://myapp.localhost:8080
+https://myapp.example.com
 ```
-
-If you're using a remote server, the URL would use that server's domain.
-
-## Advanced Usage
-
-### Configuration Management
-
-List your saved configurations:
-
-```bash
-tiny-tunnel config list
-```
-
-Set a default server:
-
-```bash
-tiny-tunnel config set-default myserver.example.com
-```
-
-### Custom Echo Service
-
-For testing, you can use the built-in echo service:
-
-```bash
-tiny-tunnel echo
-```
-
-This starts a simple server that echoes back requests, useful for testing your tunnel setup.
 
 ## Example Use Cases
 
