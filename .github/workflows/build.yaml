@@ -26,4 +26,6 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           push: true
-          tags: ghcr.io/campbel/tiny-tunnel:latest
+          tags: |
+            ghcr.io/campbel/tiny-tunnel:latest
+            ghcr.io/campbel/tiny-tunnel:${{ github.sha }}
