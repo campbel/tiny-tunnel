@@ -24,8 +24,8 @@ type ServerConfig struct {
 
 // ConfigFile represents the auth.json file structure
 type ConfigFile struct {
-	Current string                    `json:"current,omitempty"` // Current default server
-	Servers map[string]ServerConfig   `json:"servers"`
+	Current string                  `json:"current,omitempty"` // Current default server
+	Servers map[string]ServerConfig `json:"servers"`
 }
 
 // getConfigFilePath returns the path to the auth.json config file
@@ -70,22 +70,22 @@ func GetConfig() (ConfigFile, error) {
 // saveConfig saves the config file
 func saveConfig(config ConfigFile) error {
 	configPath := getConfigFilePath()
-	
+
 	// Create directory if it doesn't exist
 	configDir := filepath.Dir(configPath)
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-	
+
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-	
+
 	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -115,7 +115,7 @@ func getServerInfo(server string) (ServerInfo, error) {
 
 	// Parse the server string to extract hostname and port
 	var hostname, port string
-	
+
 	// Check if it's a full URL
 	if strings.HasPrefix(server, "http://") || strings.HasPrefix(server, "https://") {
 		parsedURL, err := url.Parse(server)
@@ -135,23 +135,23 @@ func getServerInfo(server string) (ServerInfo, error) {
 		// Just hostname
 		hostname = server
 	}
-	
+
 	config, err := loadConfig()
 	if err != nil {
 		return ServerInfo{}, err
 	}
-	
+
 	// Create a lookup key including port if provided
 	serverKey := hostname
 	if port != "" {
 		serverKey = fmt.Sprintf("%s:%s", hostname, port)
 	}
-	
+
 	// Try to find exact match with hostname:port
 	for configServer, serverConfig := range config.Servers {
 		// Check if stored server has port info
 		storedPort := serverConfig.Port
-		
+
 		// Scenario 1: Direct match with the stored key
 		if configServer == serverKey || configServer == hostname {
 			return ServerInfo{
@@ -161,8 +161,8 @@ func getServerInfo(server string) (ServerInfo, error) {
 				AuthToken: serverConfig.AuthToken,
 			}, nil
 		}
-		
-		// Scenario 2: Match hostname and port separately 
+
+		// Scenario 2: Match hostname and port separately
 		// If stored server is just hostname but has port config matching our port
 		if configServer == hostname && storedPort == port {
 			return ServerInfo{
@@ -172,8 +172,8 @@ func getServerInfo(server string) (ServerInfo, error) {
 				AuthToken: serverConfig.AuthToken,
 			}, nil
 		}
-		
-		// Scenario 3: Match with hostname:port format 
+
+		// Scenario 3: Match with hostname:port format
 		configParts := strings.Split(configServer, ":")
 		configHostname := configParts[0]
 		var configPort string
@@ -182,7 +182,7 @@ func getServerInfo(server string) (ServerInfo, error) {
 		} else {
 			configPort = storedPort
 		}
-		
+
 		if configHostname == hostname && (port == "" || configPort == port) {
 			return ServerInfo{
 				Hostname:  configHostname,
@@ -192,7 +192,7 @@ func getServerInfo(server string) (ServerInfo, error) {
 			}, nil
 		}
 	}
-	
+
 	return ServerInfo{}, fmt.Errorf("server not found in config")
 }
 
@@ -202,16 +202,16 @@ func getCurrentServerInfo() (ServerInfo, error) {
 	if err != nil {
 		return ServerInfo{}, err
 	}
-	
+
 	if config.Current == "" {
 		return ServerInfo{}, fmt.Errorf("no current server set")
 	}
-	
+
 	serverConfig, ok := config.Servers[config.Current]
 	if !ok {
 		return ServerInfo{}, fmt.Errorf("current server not found in config")
 	}
-	
+
 	return ServerInfo{
 		Hostname:  config.Current,
 		Port:      serverConfig.Port,
@@ -224,7 +224,7 @@ func getCurrentServerInfo() (ServerInfo, error) {
 func SetDefaultServer(server string) error {
 	// Parse server information
 	var hostname, port string
-	
+
 	if strings.HasPrefix(server, "http://") || strings.HasPrefix(server, "https://") {
 		parsedURL, err := url.Parse(server)
 		if err == nil {
@@ -242,30 +242,30 @@ func SetDefaultServer(server string) error {
 		// Just hostname
 		hostname = server
 	}
-	
+
 	config, err := loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	
+
 	// Create lookup key with port if provided
 	lookupKey := hostname
 	if port != "" {
 		lookupKey = fmt.Sprintf("%s:%s", hostname, port)
 	}
-	
+
 	// First try exact match with key
 	if _, ok := config.Servers[lookupKey]; ok {
 		config.Current = lookupKey
 		return saveConfig(config)
 	}
-	
+
 	// Try to find a matching server with any port
 	foundKey := ""
 	for configServer := range config.Servers {
 		configParts := strings.Split(configServer, ":")
 		configHostname := configParts[0]
-		
+
 		// If we have a port, match hostname and port
 		if port != "" {
 			if configHostname == hostname && len(configParts) > 1 && configParts[1] == port {
@@ -278,14 +278,14 @@ func SetDefaultServer(server string) error {
 			break
 		}
 	}
-	
+
 	if foundKey == "" {
 		return fmt.Errorf("server '%s' not found in config, please login first", server)
 	}
-	
+
 	// Set as current server
 	config.Current = foundKey
-	
+
 	return saveConfig(config)
 }
 
@@ -293,7 +293,7 @@ func SetDefaultServer(server string) error {
 func SaveTokenToConfig(server, token string) error {
 	// Extract hostname, port, and protocol if a full URL was provided
 	var hostname, port, protocol string
-	
+
 	// Parse server information
 	if strings.HasPrefix(server, "http://") || strings.HasPrefix(server, "https://") {
 		parsedURL, err := url.Parse(server)
@@ -325,33 +325,31 @@ func SaveTokenToConfig(server, token string) error {
 			protocol = "https"
 		}
 	}
-	
+
 	config, err := loadConfig()
 	if err != nil {
 		config = ConfigFile{
 			Servers: make(map[string]ServerConfig),
 		}
 	}
-	
+
 	// Create the server key for storage
 	// Include port in the key if present
 	storageKey := hostname
 	if port != "" {
 		storageKey = fmt.Sprintf("%s:%s", hostname, port)
 	}
-	
+
 	// Store server config with all details
 	config.Servers[storageKey] = ServerConfig{
 		AuthToken: token,
 		Port:      port,
 		Protocol:  protocol,
 	}
-	
-	// Set as current if no current is set or if this is the first server
-	if config.Current == "" || len(config.Servers) == 1 {
-		config.Current = storageKey
-	}
-	
+
+	// Set as current
+	config.Current = storageKey
+
 	return saveConfig(config)
 }
 
@@ -379,7 +377,7 @@ func (c Options) Origin() string {
 	if len(hostParts) > 1 {
 		host = hostParts[0]
 	}
-	
+
 	return c.SchemeHTTP() + "://" + host
 }
 
@@ -387,7 +385,7 @@ func (c Options) URL() string {
 	// Extract hostname and port if serverHost already contains port info
 	host := c.ServerHost
 	port := c.ServerPort
-	
+
 	// Check if host already contains a port
 	hostParts := strings.Split(host, ":")
 	if len(hostParts) > 1 {
@@ -410,7 +408,7 @@ func (c Options) URL() string {
 			}
 		}
 	}
-	
+
 	url := c.SchemeWS() + "://" + host + ":" + port + "/register?name=" + c.Name
 	return url
 }
@@ -420,7 +418,7 @@ func (c Options) SchemeHTTP() string {
 	if serverInfo, err := c.GetServerInfo(); err == nil && serverInfo.Protocol != "" {
 		return serverInfo.Protocol
 	}
-	
+
 	// Fall back to using the insecure flag
 	if c.Insecure {
 		return "http"

@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/campbel/tiny-tunnel/core/protocol"
@@ -46,12 +48,12 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 	if headers == nil {
 		headers = http.Header{}
 	}
-	
+
 	// Add auth token if available
 	if token := options.GetResolvedToken(); token != "" {
 		headers.Set("X-Auth-Token", token)
 	}
-	
+
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, options.URL(), headers)
 	if err != nil {
 		return nil, err
@@ -97,7 +99,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 				req.Header.Add(k, vv)
 			}
 		}
-		
+
 		// We don't need to add token to HTTP requests as tunnel access doesn't require auth
 		// The token is only needed for /register endpoint which is handled during websocket connection
 
@@ -144,10 +146,10 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 
 		// Prepare headers for the WebSocket connection
 		wsHeaders := http.Header{"Origin": []string{payload.Origin}}
-		
+
 		// We don't need to add token to WebSocket connections as tunnel access doesn't require auth
 		// The token is only needed for /register endpoint which is handled during initial websocket connection
-		
+
 		rawConn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsUrl.String()+payload.Path, wsHeaders)
 		if err != nil {
 			tunnel.SendResponse(protocol.MessageKindWebsocketCreateResponse, id, &protocol.WebsocketCreateResponsePayload{Error: err})
@@ -242,7 +244,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 				req.Header.Add(k, vv)
 			}
 		}
-		
+
 		// We don't need to add token to SSE requests as tunnel access doesn't require auth
 		// The token is only needed for /register endpoint which is handled during initial websocket connection
 
@@ -266,4 +268,92 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 	})
 
 	return tunnel, nil
+}
+
+// TestAuth verifies if the token is valid by making a request to the auth-test endpoint
+func TestAuth(options Options) (map[string]any, error) {
+	// Get server URL from the parsed URL in options
+	serverURL, err := url.Parse(options.ServerHost)
+	if err != nil || (serverURL.Scheme != "http" && serverURL.Scheme != "https") {
+		// If parsing fails or no scheme, try to parse it properly
+		serverURL, err = parseServerURL(options.ServerHost)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse server URL: %w", err)
+		}
+	}
+	
+	// Build the auth test URL
+	authTestURL, err := url.JoinPath(serverURL.String(), "/api/auth-test")
+	if err != nil {
+		return nil, fmt.Errorf("failed to build auth test URL: %w", err)
+	}
+
+	// Create a request with auth token header
+	req, err := http.NewRequest("GET", authTestURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add auth token to header
+	token := options.GetResolvedToken()
+	if token == "" {
+		return nil, fmt.Errorf("no authentication token available")
+	}
+	req.Header.Set("X-Auth-Token", token)
+
+	// Make the request
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("authentication failed with status code: %d", resp.StatusCode)
+	}
+
+	// Read and parse response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Parse JSON response
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Check if the token is valid
+	valid, ok := result["valid"].(bool)
+	if !ok {
+		return nil, fmt.Errorf("invalid response format")
+	}
+	if !valid {
+		return nil, fmt.Errorf("token is invalid")
+	}
+
+	return result, nil
+}
+
+// parseServerURL parses a server string into a URL
+func parseServerURL(server string) (*url.URL, error) {
+	// Check if server already has a scheme
+	if !strings.HasPrefix(server, "http://") && !strings.HasPrefix(server, "https://") {
+		// No scheme provided, check if it's localhost or IP
+		if strings.HasPrefix(server, "localhost") || strings.HasPrefix(server, "127.0.0.1") {
+			server = "http://" + server
+		} else {
+			server = "https://" + server
+		}
+	}
+
+	// Parse URL
+	parsedURL, err := url.Parse(server)
+	if err != nil {
+		return nil, fmt.Errorf("invalid server URL: %w", err)
+	}
+
+	return parsedURL, nil
 }

@@ -57,6 +57,7 @@ func NewHandler(options Options) http.Handler {
 		router.HandleFunc("/login", server.authEmailMiddleware(server.HandleLogin))
 		router.HandleFunc("/", server.HandleRoot)
 		router.HandleFunc("/api/token", server.HandleGenerateToken)
+		router.HandleFunc("/api/auth-test", server.authTokenMiddleware(server.HandleAuthTest))
 	} else {
 		router.HandleFunc("/register", server.HandleRegister)
 		router.HandleFunc("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -249,6 +250,24 @@ func (s *Handler) HandleGenerateToken(w http.ResponseWriter, r *http.Request) {
 	// Return the JWT token as JSON
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(fmt.Sprintf(`{"token":"%s","expires":"%s"}`, tokenString, expirationTime.Format(time.RFC3339))))
+}
+
+func (s *Handler) HandleAuthTest(w http.ResponseWriter, r *http.Request) {
+	// Get claims from context (already validated by authTokenMiddleware)
+	claims, ok := r.Context().Value(claimsContextKey).(*Claims)
+	if !ok {
+		http.Error(w, "unauthorized: token validation failed", http.StatusUnauthorized)
+		return
+	}
+
+	// Return the token information as JSON
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(fmt.Sprintf(`{
+		"valid": true,
+		"email": "%s",
+		"scopes": %q,
+		"expires": "%s"
+	}`, claims.Email, claims.Scopes, claims.ExpiresAt.Time.Format(time.RFC3339))))
 }
 
 func (s *Handler) HandleTunnelRequest(w http.ResponseWriter, r *http.Request) {
