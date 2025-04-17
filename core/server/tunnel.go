@@ -21,10 +21,20 @@ type Tunnel struct {
 	websocketConns *safe.Map[string, *safe.WSConn]
 }
 
-func NewTunnel(conn *websocket.Conn) *Tunnel {
+type TunnelOptions struct {
+	HelloMessage string
+}
+
+func NewTunnel(conn *websocket.Conn, options TunnelOptions) *Tunnel {
 	server := &Tunnel{
 		tunnel:         shared.NewTunnel(conn),
 		websocketConns: safe.NewMap[string, *safe.WSConn](),
+	}
+
+	if options.HelloMessage != "" {
+		server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
+			Text: options.HelloMessage,
+		})
 	}
 
 	server.tunnel.RegisterWebsocketMessageHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketMessagePayload) {

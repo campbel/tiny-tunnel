@@ -135,7 +135,9 @@ func TestServerTunnel(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		serverTunnel := server.NewTunnel(conn)
+		serverTunnel := server.NewTunnel(conn, server.TunnelOptions{
+			HelloMessage: "hello, world!",
+		})
 		serverTunnelChan <- serverTunnel
 		serverTunnel.Listen(serverCtx)
 	}))

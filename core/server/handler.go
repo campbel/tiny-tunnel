@@ -156,7 +156,9 @@ func (s *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tunnel := NewTunnel(conn)
+	tunnel := NewTunnel(conn, TunnelOptions{
+		HelloMessage: fmt.Sprintf("Welcome to Tiny Tunnel! Your tunnel is ready at %s", s.options.GetTunnelURL(name)),
+	})
 	if !s.tunnels.SetNX(name, tunnel) {
 		http.Error(w, "name is already used", http.StatusBadRequest)
 		return
