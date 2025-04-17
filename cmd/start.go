@@ -46,26 +46,29 @@ var startCmd = &cobra.Command{
 			ServerHeaders:     convertMapToHeaders(serverHeaders),
 			Token:             token,
 		}
-		
+
 		// If server host is not specified, try to use the default from config
 		if serverHost == "" {
 			if serverInfo, err := options.GetServerInfo(); err == nil {
 				log.Info("using default server from config", "server", serverInfo.Hostname)
 				options.ServerHost = serverInfo.Hostname
-				
-				// Only use port from config if not specified via command line
-				if serverPort == "" && serverInfo.Port != "" {
-					options.ServerPort = serverInfo.Port
-				}
-				
-				// If insecure flag not explicitly set, determine from protocol
-				if !cmd.Flags().Changed("insecure") && serverInfo.Protocol == "http" {
+
+				// Determine if insecure
+				if insecure || serverInfo.Protocol == "http" {
 					options.Insecure = true
+				} else {
+					options.Insecure = false
+					options.ServerPort = "443"
+				}
+
+				// Use port from config if specified
+				if serverInfo.Port != "" {
+					options.ServerPort = serverInfo.Port
 				}
 			}
 		}
 
-		log.Info("connecting...")
+		log.Info("connecting...", "server", options.ServerHost, "port", options.ServerPort, "insecure", options.Insecure)
 	LOOP:
 		for i := 0; i < reconnectAttempts; i++ {
 			select {
@@ -105,7 +108,7 @@ func getTunnelAddress(options client.Options) string {
 	// Extract hostname and port
 	host := options.ServerHost
 	port := options.ServerPort
-	
+
 	// Parse hostname if it contains port
 	hostParts := strings.Split(host, ":")
 	if len(hostParts) > 1 {
@@ -115,7 +118,7 @@ func getTunnelAddress(options client.Options) string {
 			port = hostParts[1]
 		}
 	}
-	
+
 	// Get port from config if not specified
 	if port == "" {
 		if serverInfo, err := options.GetServerInfo(); err == nil && serverInfo.Port != "" {
@@ -129,12 +132,12 @@ func getTunnelAddress(options client.Options) string {
 			}
 		}
 	}
-	
+
 	scheme := "https"
 	if options.Insecure {
 		scheme = "http"
 	}
-	
+
 	return fmt.Sprintf("%s://%s.%s:%s", scheme, options.Name, host, port)
 }
 
