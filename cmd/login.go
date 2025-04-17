@@ -43,9 +43,17 @@ Examples:
 		// Save original server string for config
 		originalServer := serverArg
 		
-		fmt.Printf("Opening %s in your browser...\n", serverURL.String())
-		if err := openBrowser(serverURL.String()); err != nil {
-			fmt.Printf("Failed to open browser automatically. Please open this URL manually: %s\n", serverURL.String())
+		// Create login URL
+		loginURL := serverURL.String()
+		if !strings.HasSuffix(loginURL, "/") {
+			loginURL += "/login"
+		} else {
+			loginURL += "login"
+		}
+		
+		fmt.Printf("Opening %s in your browser...\n", loginURL)
+		if err := openBrowser(loginURL); err != nil {
+			fmt.Printf("Failed to open browser automatically. Please open this URL manually: %s\n", loginURL)
 		}
 		
 		fmt.Println("\nA JWT token has been generated in your browser.")

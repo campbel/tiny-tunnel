@@ -1,16 +1,31 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // Check if we're on the login page
     const tokenValue = document.getElementById('token-value');
     const tokenExpires = document.getElementById('token-expires');
     const tokenEmail = document.getElementById('token-email');
     const copyButton = document.getElementById('copy-token');
+    
+    // Check if we're on the home page with the command
+    const copyCommandButton = document.getElementById('copy-command');
+    
+    // Setup command copy button if on home page
+    if (copyCommandButton) {
+        copyCommandButton.addEventListener('click', () => {
+            const command = document.getElementById('login-command').textContent;
+            copyToClipboard(command, copyCommandButton);
+        });
+    }
+    
+    // If we're on the login page
+    if (tokenValue && copyButton) {
+        // Generate token automatically when the page loads
+        generateToken();
 
-    // Generate token automatically when the page loads
-    generateToken();
-
-    // Setup copy button
-    copyButton.addEventListener('click', () => {
-        copyToClipboard(tokenValue.textContent);
-    });
+        // Setup copy button
+        copyButton.addEventListener('click', () => {
+            copyToClipboard(tokenValue.textContent, copyButton);
+        });
+    }
 
     async function generateToken() {
         try {
@@ -63,17 +78,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function copyToClipboard(text) {
+    function copyToClipboard(text, button) {
         navigator.clipboard.writeText(text)
             .then(() => {
                 // Visual feedback for copy
-                const originalText = copyButton.textContent;
-                copyButton.textContent = 'Copied!';
-                copyButton.style.backgroundColor = '#27ae60';
+                const originalText = button.textContent;
+                const originalBgColor = button.style.backgroundColor;
+                button.textContent = 'Copied!';
+                button.style.backgroundColor = '#27ae60';
                 
                 setTimeout(() => {
-                    copyButton.textContent = originalText;
-                    copyButton.style.backgroundColor = '';
+                    button.textContent = originalText;
+                    button.style.backgroundColor = originalBgColor;
                 }, 2000);
             })
             .catch(err => {

@@ -25,7 +25,7 @@ cmds:
   start:
     desc: "Start the development server"
     steps:
-      - air start --insecure=true --name example --target http://localhost:3000
+      - air start --insecure=true --name example --target http://localhost:3000 --server-host localhost --server-port 8080
 
   login:
     desc: "Login to the development server"

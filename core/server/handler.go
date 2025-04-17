@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/core/server/ui"
@@ -53,7 +54,8 @@ func NewHandler(options Options) http.Handler {
 		// Serve static files for the UI
 		router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", ui.GetHandler()))
 		// API endpoint for token generation with email auth middleware
-		router.HandleFunc("/", server.authEmailMiddleware(server.HandleRoot))
+		router.HandleFunc("/login", server.authEmailMiddleware(server.HandleLogin))
+		router.HandleFunc("/", server.HandleRoot)
 		router.HandleFunc("/api/token", server.HandleGenerateToken)
 	} else {
 		router.HandleFunc("/register", server.HandleRegister)
@@ -83,8 +85,34 @@ func (s *Handler) HandleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert to string to add the server host dynamically
+	indexHTML := string(indexData)
+	serverHost := r.Host
+
+	// Replace the placeholder with the actual server host
+	indexHTML = strings.Replace(indexHTML, `<span id="server-host">SERVER_HOST</span>`,
+		fmt.Sprintf(`<span id="server-host">%s</span>`, serverHost), 1)
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(indexData)
+	w.Write([]byte(indexHTML))
+}
+
+func (s *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-TT-Tunnel") != "" {
+		s.HandleTunnelRequest(w, r)
+		return
+	}
+
+	// Serve our login.html
+	loginData, err := ui.StaticFiles.ReadFile("static/login.html")
+	if err != nil {
+		log.Error("error reading login.html", "err", err)
+		http.Error(w, "Error loading login page", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(loginData)
 }
 
 func (s *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
