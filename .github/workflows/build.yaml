@@ -79,7 +79,11 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: ./bin
+          path: ./artifacts
+      - name: Move artifacts to bin directory
+        run: |
+          mkdir -p ./bin
+          cp ./artifacts/*/* ./bin/
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
