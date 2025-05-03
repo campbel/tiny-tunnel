@@ -12,6 +12,18 @@ Tiny Tunnel is a lightweight, secure solution for exposing local servers to the 
 
 ## Installation
 
+### One-line Installation (macOS and Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/campbel/tiny-tunnel/main/install.sh | bash
+```
+
+This script automatically downloads the latest version for your OS and architecture.
+
+### Manual Download
+
+You can download the latest binaries directly from the [releases page](https://github.com/campbel/tiny-tunnel/releases).
+
 ### Using Go
 
 ```bash
@@ -33,7 +45,7 @@ docker run -it --rm ghcr.io/campbel/tiny-tunnel:latest --help
 Before creating tunnels, you need to authenticate with the server:
 
 ```bash
-tiny-tunnel login example.com
+tnl login example.com
 ```
 
 This will open a browser window where you can generate and copy an authentication token. The token will be stored in the configuration at `~/.config/tiny-tunnel/auth.json`
@@ -43,10 +55,18 @@ This will open a browser window where you can generate and copy an authenticatio
 To expose a local service:
 
 ```bash
-tiny-tunnel start --name myapp --target http://localhost:3000
+tnl start --name myapp --target http://localhost:3000
 ```
 
 This creates a tunnel named "myapp" that forwards requests to your local service running on port 3000.
+
+### Updating to the Latest Version
+
+You can easily update to the latest version using the built-in updater:
+
+```bash
+tnl update
+```
 
 ### Accessing Your Service
 
