@@ -126,6 +126,14 @@ fi
 echo -e "${BLUE}📦 Installing to $INSTALL_DIR/${BINARY_NAME}...${NC}"
 $SUDO mv "$BINARY_PATH" "$INSTALL_DIR/$BINARY_NAME"
 
+# If sudo was needed, chown the binary back to the current user
+if [ -n "$SUDO" ]; then
+    echo -e "${BLUE}🔐 Setting permissions...${NC}"
+    CURRENT_USER=$(whoami)
+    $SUDO chown $CURRENT_USER "$INSTALL_DIR/$BINARY_NAME"
+    $SUDO chmod 755 "$INSTALL_DIR/$BINARY_NAME"
+fi
+
 # Clean up
 rm -rf "$TMP_DIR"
 
