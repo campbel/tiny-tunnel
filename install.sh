@@ -3,8 +3,18 @@ set -e
 
 # Define variables
 GITHUB_REPO="campbel/tiny-tunnel"
-INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="tnl"
+
+# Determine installation directory
+if [ -d "$HOME/.local/bin" ]; then
+    INSTALL_DIR="$HOME/.local/bin"
+elif [ -d "$HOME/bin" ]; then
+    INSTALL_DIR="$HOME/bin"
+else
+    # Create ~/.local/bin if it doesn't exist
+    INSTALL_DIR="$HOME/.local/bin"
+    mkdir -p "$INSTALL_DIR"
+fi
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -115,24 +125,10 @@ fi
 # Make binary executable
 chmod +x "$BINARY_PATH"
 
-# Check if installation requires sudo
-if [ -w "$INSTALL_DIR" ]; then
-    SUDO=""
-else
-    SUDO="sudo"
-fi
-
 # Install binary
 echo -e "${BLUE}📦 Installing to $INSTALL_DIR/${BINARY_NAME}...${NC}"
-$SUDO mv "$BINARY_PATH" "$INSTALL_DIR/$BINARY_NAME"
-
-# If sudo was needed, chown the binary back to the current user
-if [ -n "$SUDO" ]; then
-    echo -e "${BLUE}🔐 Setting permissions...${NC}"
-    CURRENT_USER=$(whoami)
-    $SUDO chown $CURRENT_USER "$INSTALL_DIR/$BINARY_NAME"
-    $SUDO chmod 755 "$INSTALL_DIR/$BINARY_NAME"
-fi
+mv "$BINARY_PATH" "$INSTALL_DIR/$BINARY_NAME"
+chmod 755 "$INSTALL_DIR/$BINARY_NAME"
 
 # Clean up
 rm -rf "$TMP_DIR"
@@ -142,9 +138,25 @@ if command -v $BINARY_NAME &> /dev/null; then
     echo -e "${GREEN}✅ tnl $VERSION has been successfully installed!${NC}"
     echo -e "${BLUE}Try it out with: ${YELLOW}$BINARY_NAME --help${NC}"
 else
-    echo -e "${RED}❌ Installation failed. The binary might not be in your PATH.${NC}"
     echo -e "${YELLOW}The binary was installed to: $INSTALL_DIR/$BINARY_NAME${NC}"
-    exit 1
+    echo -e "${YELLOW}But it seems this directory is not in your PATH.${NC}"
+    
+    # Provide instructions for adding to PATH
+    echo -e "\n${BLUE}To add this directory to your PATH, run:${NC}"
+    
+    if [[ "$SHELL" == */zsh ]]; then
+        echo -e "${YELLOW}echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.zshrc${NC}"
+        echo -e "${YELLOW}source ~/.zshrc${NC}"
+    elif [[ "$SHELL" == */bash ]]; then
+        echo -e "${YELLOW}echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.bashrc${NC}"
+        echo -e "${YELLOW}source ~/.bashrc${NC}"
+    else
+        echo -e "${YELLOW}export PATH=\"$INSTALL_DIR:\$PATH\"${NC}"
+        echo -e "${YELLOW}Add the above line to your shell's startup file.${NC}"
+    fi
+    
+    echo -e "\n${BLUE}For now, you can run it directly with:${NC}"
+    echo -e "${YELLOW}$INSTALL_DIR/$BINARY_NAME --help${NC}"
 fi
 
 # Add example usage

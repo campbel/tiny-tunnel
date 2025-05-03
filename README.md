@@ -18,7 +18,11 @@ Tiny Tunnel is a lightweight, secure solution for exposing local servers to the 
 curl -fsSL https://raw.githubusercontent.com/campbel/tiny-tunnel/main/install.sh | bash
 ```
 
-This script automatically downloads the latest version for your OS and architecture.
+This script automatically:
+- Downloads the latest version for your OS and architecture
+- Installs to `~/.local/bin` or `~/bin` (no sudo required)
+- Makes the binary executable
+- Provides instructions if the directory is not in your PATH
 
 ### Manual Download
 
