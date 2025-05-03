@@ -32,10 +32,11 @@ else
     exit 1
 fi
 
-# Extract version
-VERSION=$(echo $RELEASE_DATA | grep -o '"tag_name":"[^"]*' | sed 's/"tag_name":"//')
+# Extract version - Method 2 from test (more reliable)
+VERSION=$(echo "$RELEASE_DATA" | grep "tag_name" | head -1 | awk -F': "' '{print $2}' | awk -F'",' '{print $1}')
 if [ -z "$VERSION" ]; then
     echo -e "${RED}❌ Error: Unable to fetch the latest version. Please check your internet connection and try again.${NC}"
+    echo -e "${YELLOW}API response (first 100 chars): ${NC}$(echo "$RELEASE_DATA" | head -c 100)"
     exit 1
 fi
 echo -e "${GREEN}✅ Latest version: $VERSION${NC}"
@@ -66,21 +67,22 @@ esac
 
 echo -e "${BLUE}🖥️  Detected: $OS/$ARCH${NC}"
 
-# Construct download URL
+# Construct download URL - Method 2 from test (more reliable)
 BINARY_URL=""
 ASSET_NAME="tnl-$OS-$ARCH"
-ASSET_URLS=$(echo $RELEASE_DATA | grep -o '"browser_download_url":"[^"]*')
-for url in $ASSET_URLS; do
-    url=$(echo $url | sed 's/"browser_download_url":"//g')
-    if [[ $url == *"$ASSET_NAME"* ]]; then
-        BINARY_URL=$url
-        break
-    fi
-done
+echo -e "${BLUE}🔍 Looking for asset: $ASSET_NAME${NC}"
 
+# Try using grep to extract the URL
+ASSET_INFO=$(echo "$RELEASE_DATA" | grep -A 1 "\"name\": \"$ASSET_NAME\"")
+if [ -n "$ASSET_INFO" ]; then
+    BINARY_URL=$(echo "$ASSET_INFO" | grep "browser_download_url" | sed -E 's/.*"browser_download_url": "([^"]*)".*/\1/')
+fi
+
+# If that didn't work, try constructed URL
 if [ -z "$BINARY_URL" ]; then
-    echo -e "${RED}❌ Error: No binary found for $OS/$ARCH${NC}"
-    exit 1
+    echo -e "${YELLOW}Warning: Asset not found in release data, trying direct URL construction...${NC}"
+    BINARY_URL="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$ASSET_NAME"
+    echo -e "${YELLOW}Using URL: $BINARY_URL${NC}"
 fi
 
 # Create temporary directory
@@ -88,11 +90,26 @@ TMP_DIR=$(mktemp -d)
 BINARY_PATH="$TMP_DIR/$BINARY_NAME"
 
 # Download the binary
-echo -e "${BLUE}📥 Downloading tnl...${NC}"
+echo -e "${BLUE}📥 Downloading tnl from $BINARY_URL...${NC}"
 if command -v curl &> /dev/null; then
-    curl -sL "$BINARY_URL" -o "$BINARY_PATH"
+    HTTP_STATUS=$(curl -sL -w "%{http_code}" "$BINARY_URL" -o "$BINARY_PATH")
+    if [ "$HTTP_STATUS" != "200" ]; then
+        echo -e "${RED}❌ Error: Download failed with HTTP status $HTTP_STATUS${NC}"
+        rm -f "$BINARY_PATH"
+        exit 1
+    fi
 elif command -v wget &> /dev/null; then
-    wget -q -O "$BINARY_PATH" "$BINARY_URL"
+    if ! wget -q -O "$BINARY_PATH" "$BINARY_URL"; then
+        echo -e "${RED}❌ Error: Download failed${NC}"
+        rm -f "$BINARY_PATH"
+        exit 1
+    fi
+fi
+
+# Verify the download was successful
+if [ ! -s "$BINARY_PATH" ]; then
+    echo -e "${RED}❌ Error: Downloaded file is empty${NC}"
+    exit 1
 fi
 
 # Make binary executable
