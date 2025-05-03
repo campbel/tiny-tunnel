@@ -171,9 +171,19 @@ func (s *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	log.Info("unregistered tunnel", "name", name)
 }
 
+// getHeaderCaseInsensitive retrieves a header value using case-insensitive matching
+func getHeaderCaseInsensitive(r *http.Request, header string) string {
+	for key, values := range r.Header {
+		if strings.EqualFold(key, header) && len(values) > 0 {
+			return values[0]
+		}
+	}
+	return ""
+}
+
 func (s *Handler) authEmailMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		email := r.Header.Get("X-Auth-Request-Email")
+		email := getHeaderCaseInsensitive(r, "X-Auth-Request-Email")
 		if email == "" {
 			http.Error(w, "Unauthorized: Missing X-Auth-Request-Email header", http.StatusUnauthorized)
 			return
@@ -185,7 +195,7 @@ func (s *Handler) authEmailMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Handler) authTokenMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tokenHeader := r.Header.Get("X-Auth-Token")
+		tokenHeader := getHeaderCaseInsensitive(r, "X-Auth-Token")
 		if tokenHeader == "" {
 			http.Error(w, "Unauthorized: Missing X-Auth-Token header", http.StatusUnauthorized)
 			return
@@ -223,7 +233,7 @@ func (s *Handler) HandleGenerateToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get email from header
-	email := r.Header.Get("X-Auth-Request-Email")
+	email := getHeaderCaseInsensitive(r, "X-Auth-Request-Email")
 	if email == "" {
 		http.Error(w, "Unauthorized: Missing X-Auth-Request-Email header", http.StatusUnauthorized)
 		return

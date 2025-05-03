@@ -6,8 +6,7 @@
 tools: [{ golang: "1.23.4" }]
 
 dotenv: []
-env:
-  DEBUG: "true"
+env: {}
 
 up:
   - sh: command -v overmind || brew install overmind
