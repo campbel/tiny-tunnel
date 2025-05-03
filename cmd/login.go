@@ -115,7 +115,7 @@ Examples:
 
 		fmt.Println(`You can now start a tunnel like:
 
-tiny-tunnel start --name my-tunnel --target http://localhost:8080
+tiny-tunnel start --name myapp --target http://localhost:8080
     `)
 
 		return nil

@@ -6,8 +6,20 @@ on:
       - main
 
 jobs:
-  build-push:
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+    steps:
+      - name: "Checkout GitHub Action"
+        uses: actions/checkout@main
+      - name: "Get version number"
+        id: version
+        run: echo "VERSION=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
+
+  build-image:
+    runs-on: ubuntu-latest
+    needs: version
     permissions:
       contents: read
       packages: write
@@ -29,3 +41,53 @@ jobs:
           tags: |
             ghcr.io/campbel/tiny-tunnel:latest
             ghcr.io/campbel/tiny-tunnel:${{ github.sha }}
+            ghcr.io/campbel/tiny-tunnel:${{ needs.version.outputs.VERSION }}
+
+  build-binary:
+    name: Build and Release
+    runs-on: ubuntu-latest # Using Ubuntu for all builds since Go cross-compiles well
+
+    strategy:
+      matrix:
+        os: [darwin, linux]
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.23"
+      - name: Build for ${{ matrix.os }}-${{ matrix.arch }}
+        run: |
+          mkdir -p ./bin
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o ./bin/tnl-${{ matrix.os }}-${{ matrix.arch }} ./cmd/
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tnl-${{ matrix.os }}-${{ matrix.arch }}
+          path: ./bin/tnl-${{ matrix.os }}-${{ matrix.arch }}
+
+  release:
+    name: Create Release
+    needs: [build-binary, version]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./bin
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ needs.version.outputs.VERSION }}
+          tag_name: v${{ needs.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          files: |
+            ./bin/tnl-darwin-amd64
+            ./bin/tnl-darwin-arm64
+            ./bin/tnl-linux-amd64
+            ./bin/tnl-linux-arm64
+          token: ${{ secrets.GITHUB_TOKEN }}
