@@ -1,121 +1,236 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tiny Tunnel</title>
-    <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
     <div class="container">
-        <header>
-            <div class="logo">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M3 8V16C3 18.2091 4.79086 20 7 20H17C19.2091 20 21 18.2091 21 16V8C21 5.79086 19.2091 4 17 4H7C4.79086 4 3 5.79086 3 8Z" stroke="currentColor" stroke-width="2"/>
-                    <path d="M7 12H17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <h1>Tiny Tunnel</h1>
-            </div>
-        </header>
-        
-        <main>
-            <section class="hero">
-                <h2>Secure tunneling for local development</h2>
-                <p>Expose local servers to the internet quickly and securely.</p>
-                <div class="getting-started">
-                    <h3>Getting Started</h3>
-                    <p>Run the following command in your terminal:</p>
-                    <div class="code-block">
-                        <code id="login-command">tiny-tunnel login <span id="server-host">SERVER_HOST</span></code>
-                        <button id="copy-command" class="copy-btn">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M8 4V16C8 17.1046 8.89543 18 10 18H20C21.1046 18 22 17.1046 22 16V7.41421C22 6.88378 21.7893 6.37507 21.4142 6L19 3.58579C18.6249 3.21071 18.1162 3 17.5858 3H10C8.89543 3 8 3.89543 8 5V16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                                <path d="M16 18V20C16 21.1046 15.1046 22 14 22H4C2.89543 22 2 21.1046 2 20V9C2 7.89543 2.89543 7 4 7H6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                            </svg>
-                            Copy
-                        </button>
-                    </div>
-                    <div class="buttons-row">
-                        <a href="https://github.com/campbel/tiny-tunnel" class="button secondary" target="_blank">Documentation</a>
-                    </div>
-                </div>
-            </section>
+      <header>
+        <div class="logo">
+          <svg
+            width="40"
+            height="40"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M3 8V16C3 18.2091 4.79086 20 7 20H17C19.2091 20 21 18.2091 21 16V8C21 5.79086 19.2091 4 17 4H7C4.79086 4 3 5.79086 3 8Z"
+              stroke="currentColor"
+              stroke-width="2"
+            />
+            <path
+              d="M7 12H17"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+          <h1>Tiny Tunnel</h1>
+        </div>
+      </header>
 
-            <section class="features">
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M19.4 15C19.1277 15.6162 19.0989 16.3018 19.3169 16.9334C19.5349 17.565 19.9859 18.0951 20.58 18.42L20.5 18.5C19.817 19.5406 18.9044 20.3926 17.83 21L17.75 20.92C17.4256 20.3266 16.9067 19.8747 16.2764 19.6557C15.6462 19.4367 14.9575 19.4644 14.35 19.73C13.7424 19.9955 13.2519 20.4808 12.994 21.0816C12.7361 21.6824 12.7275 22.3593 12.97 22.966L12.89 23C11.6644 23.2351 10.4023 23.2351 9.17671 23L9.09 22.92C8.8254 22.3285 8.33728 21.8557 7.71692 21.603C7.09656 21.3502 6.40543 21.3336 5.77338 21.5564C5.14132 21.7793 4.62103 22.2238 4.3255 22.7996C4.02997 23.3754 3.98156 24.0397 4.19 24.65L4.11 24.73C3.03546 24.123 2.1229 23.271 1.44 22.23L1.51 22.15C2.10485 21.825 2.55568 21.2949 2.77363 20.6633C2.99157 20.0316 2.96281 19.3461 2.69 18.73C2.42345 18.1224 1.93815 17.6319 1.33735 17.374C0.736555 17.1161 0.0596074 17.1075 -0.547 17.35L-0.62 17.27C-0.85507 16.0444 -0.85507 14.7823 -0.619999 13.557L-0.54 13.47C0.0514634 13.2054 0.524306 12.7173 0.777013 12.0969C1.02972 11.4765 1.04635 10.7854 0.823488 10.1534C0.600625 9.52134 0.15615 9.00105 -0.419668 8.70552C-0.995486 8.40999 -0.659696 8.36158 -1.27 8.57L-1.35 8.49C-0.742903 7.41546 0.109097 6.5029 1.15 5.82L1.23 5.89C1.55436 6.48485 2.0845 6.93568 2.71612 7.15363C3.34775 7.37157 4.0334 7.34281 4.65 7.07C5.25764 6.80345 5.74809 6.31815 6.00599 5.71735C6.26389 5.11655 6.2725 4.43961 6.03 3.833L6.11 3.76C7.33558 3.52493 8.59772 3.52493 9.823 3.76L9.9 3.84C10.1654 4.43146 10.6542 4.90431 11.2754 5.15675C11.8966 5.40919 12.5885 5.42506 13.22 5.2L13.3 5.28C14.3745 5.88701 15.2871 6.73903 15.97 7.78L15.9 7.86C15.3105 8.18839 14.8639 8.71968 14.6496 9.35090C14.4354 9.98213 14.4667 10.6659 14.737 11.274C14.8501 11.5295 15.0063 11.7635 15.1985 11.9649C15.3907 12.1663 15.6161 12.3323 15.864 12.4558C16.1119 12.5793 16.3782 12.6584 16.6523 12.6892C16.9263 12.72 17.2035 12.702 17.472 12.636C17.7406 12.5701 17.9963 12.4576 18.2274 12.3035C18.4585 12.1494 18.661 11.9562 18.8253 11.7324C18.9897 11.5086 19.1135 11.2578 19.1909 10.9918C19.2682 10.7257 19.2979 10.4487 19.279 10.173L19.36 10.1C19.5969 11.326 19.5984 12.5885 19.364 13.815L19.284 13.895C18.7026 14.1596 18.2297 14.6477 17.977 15.2681C17.7242 15.8885 17.7076 16.5796 17.9305 17.2117C18.1533 17.8437 18.5978 18.364 19.1736 18.6595C19.7495 18.955 20.4137 19.0034 20.92 18.795" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    </div>
-                    <h3>Easy Setup</h3>
-                    <p>Get started in minutes with our simple CLI tool and authentication system.</p>
-                </div>
-                
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M12 16V12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M12 8H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    </div>
-                    <h3>Secure</h3>
-                    <p>Built-in authentication and encrypted connections to keep your services protected.</p>
-                </div>
-                
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M10 13C10.4295 13.5741 10.9774 14.0492 11.6066 14.3929C12.2357 14.7367 12.9315 14.9411 13.6467 14.9923C14.3618 15.0435 15.0796 14.9404 15.7513 14.6898C16.4231 14.4392 17.0331 14.0471 17.54 13.54L20.54 10.54C21.4774 9.59763 22.0074 8.32166 22.0074 6.99C22.0074 5.65833 21.4774 4.38236 20.54 3.44C19.5976 2.49763 18.3217 1.96765 16.99 1.96765C15.6583 1.96765 14.3824 2.49763 13.44 3.44L12 4.88" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M14 11C13.5705 10.4259 13.0226 9.95084 12.3934 9.60709C11.7642 9.26333 11.0684 9.05889 10.3533 9.00766C9.63816 8.95643 8.92037 9.05961 8.24861 9.31017C7.57685 9.56073 6.96684 9.95292 6.45996 10.46L3.45996 13.46C2.52259 14.4024 1.99261 15.6783 1.99261 17.01C1.99261 18.3417 2.52259 19.6176 3.45996 20.56C4.40233 21.5024 5.6783 22.0324 7.00996 22.0324C8.34163 22.0324 9.6176 21.5024 10.56 20.56L12 19.12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    </div>
-                    <h3>Versatile</h3>
-                    <p>Support for HTTP, WebSockets, and Server-Sent Events makes it perfect for any project.</p>
-                </div>
-            </section>
-        </main>
-        
-        <footer>
-            <p>&copy; Tiny Tunnel | <a href="https://github.com/campbel/tiny-tunnel">GitHub</a></p>
-        </footer>
+      <main>
+        <section class="hero">
+          <h2>Secure tunneling for local development</h2>
+          <p>Expose local servers to the internet quickly and securely.</p>
+          <div class="getting-started">
+            <h3>Getting Started</h3>
+            <p>Run the following command in your terminal:</p>
+            <div class="code-block">
+              <code id="login-command"
+                >tnl login <span id="server-host">SERVER_HOST</span></code
+              >
+              <button id="copy-command" class="copy-btn">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M8 4V16C8 17.1046 8.89543 18 10 18H20C21.1046 18 22 17.1046 22 16V7.41421C22 6.88378 21.7893 6.37507 21.4142 6L19 3.58579C18.6249 3.21071 18.1162 3 17.5858 3H10C8.89543 3 8 3.89543 8 5V16"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M16 18V20C16 21.1046 15.1046 22 14 22H4C2.89543 22 2 21.1046 2 20V9C2 7.89543 2.89543 7 4 7H6"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                Copy
+              </button>
+            </div>
+            <div class="buttons-row">
+              <a
+                href="https://github.com/campbel/tiny-tunnel"
+                class="button secondary"
+                target="_blank"
+                >Documentation</a
+              >
+            </div>
+          </div>
+        </section>
+
+        <section class="features">
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M19.4 15C19.1277 15.6162 19.0989 16.3018 19.3169 16.9334C19.5349 17.565 19.9859 18.0951 20.58 18.42L20.5 18.5C19.817 19.5406 18.9044 20.3926 17.83 21L17.75 20.92C17.4256 20.3266 16.9067 19.8747 16.2764 19.6557C15.6462 19.4367 14.9575 19.4644 14.35 19.73C13.7424 19.9955 13.2519 20.4808 12.994 21.0816C12.7361 21.6824 12.7275 22.3593 12.97 22.966L12.89 23C11.6644 23.2351 10.4023 23.2351 9.17671 23L9.09 22.92C8.8254 22.3285 8.33728 21.8557 7.71692 21.603C7.09656 21.3502 6.40543 21.3336 5.77338 21.5564C5.14132 21.7793 4.62103 22.2238 4.3255 22.7996C4.02997 23.3754 3.98156 24.0397 4.19 24.65L4.11 24.73C3.03546 24.123 2.1229 23.271 1.44 22.23L1.51 22.15C2.10485 21.825 2.55568 21.2949 2.77363 20.6633C2.99157 20.0316 2.96281 19.3461 2.69 18.73C2.42345 18.1224 1.93815 17.6319 1.33735 17.374C0.736555 17.1161 0.0596074 17.1075 -0.547 17.35L-0.62 17.27C-0.85507 16.0444 -0.85507 14.7823 -0.619999 13.557L-0.54 13.47C0.0514634 13.2054 0.524306 12.7173 0.777013 12.0969C1.02972 11.4765 1.04635 10.7854 0.823488 10.1534C0.600625 9.52134 0.15615 9.00105 -0.419668 8.70552C-0.995486 8.40999 -0.659696 8.36158 -1.27 8.57L-1.35 8.49C-0.742903 7.41546 0.109097 6.5029 1.15 5.82L1.23 5.89C1.55436 6.48485 2.0845 6.93568 2.71612 7.15363C3.34775 7.37157 4.0334 7.34281 4.65 7.07C5.25764 6.80345 5.74809 6.31815 6.00599 5.71735C6.26389 5.11655 6.2725 4.43961 6.03 3.833L6.11 3.76C7.33558 3.52493 8.59772 3.52493 9.823 3.76L9.9 3.84C10.1654 4.43146 10.6542 4.90431 11.2754 5.15675C11.8966 5.40919 12.5885 5.42506 13.22 5.2L13.3 5.28C14.3745 5.88701 15.2871 6.73903 15.97 7.78L15.9 7.86C15.3105 8.18839 14.8639 8.71968 14.6496 9.35090C14.4354 9.98213 14.4667 10.6659 14.737 11.274C14.8501 11.5295 15.0063 11.7635 15.1985 11.9649C15.3907 12.1663 15.6161 12.3323 15.864 12.4558C16.1119 12.5793 16.3782 12.6584 16.6523 12.6892C16.9263 12.72 17.2035 12.702 17.472 12.636C17.7406 12.5701 17.9963 12.4576 18.2274 12.3035C18.4585 12.1494 18.661 11.9562 18.8253 11.7324C18.9897 11.5086 19.1135 11.2578 19.1909 10.9918C19.2682 10.7257 19.2979 10.4487 19.279 10.173L19.36 10.1C19.5969 11.326 19.5984 12.5885 19.364 13.815L19.284 13.895C18.7026 14.1596 18.2297 14.6477 17.977 15.2681C17.7242 15.8885 17.7076 16.5796 17.9305 17.2117C18.1533 17.8437 18.5978 18.364 19.1736 18.6595C19.7495 18.955 20.4137 19.0034 20.92 18.795"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </div>
+            <h3>Easy Setup</h3>
+            <p>
+              Get started in minutes with our simple CLI tool and authentication
+              system.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M12 16V12"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M12 8H12.01"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </div>
+            <h3>Secure</h3>
+            <p>
+              Built-in authentication and encrypted connections to keep your
+              services protected.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M10 13C10.4295 13.5741 10.9774 14.0492 11.6066 14.3929C12.2357 14.7367 12.9315 14.9411 13.6467 14.9923C14.3618 15.0435 15.0796 14.9404 15.7513 14.6898C16.4231 14.4392 17.0331 14.0471 17.54 13.54L20.54 10.54C21.4774 9.59763 22.0074 8.32166 22.0074 6.99C22.0074 5.65833 21.4774 4.38236 20.54 3.44C19.5976 2.49763 18.3217 1.96765 16.99 1.96765C15.6583 1.96765 14.3824 2.49763 13.44 3.44L12 4.88"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M14 11C13.5705 10.4259 13.0226 9.95084 12.3934 9.60709C11.7642 9.26333 11.0684 9.05889 10.3533 9.00766C9.63816 8.95643 8.92037 9.05961 8.24861 9.31017C7.57685 9.56073 6.96684 9.95292 6.45996 10.46L3.45996 13.46C2.52259 14.4024 1.99261 15.6783 1.99261 17.01C1.99261 18.3417 2.52259 19.6176 3.45996 20.56C4.40233 21.5024 5.6783 22.0324 7.00996 22.0324C8.34163 22.0324 9.6176 21.5024 10.56 20.56L12 19.12"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </div>
+            <h3>Versatile</h3>
+            <p>
+              Support for HTTP, WebSockets, and Server-Sent Events makes it
+              perfect for any project.
+            </p>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <p>
+          &copy; Tiny Tunnel |
+          <a href="https://github.com/campbel/tiny-tunnel">GitHub</a>
+        </p>
+      </footer>
     </div>
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            // Setup copy command button
-            const copyCommandButton = document.getElementById('copy-command');
-            if (copyCommandButton) {
-                copyCommandButton.addEventListener('click', () => {
-                    const command = document.getElementById('login-command').textContent.trim();
-                    
-                    navigator.clipboard.writeText(command)
-                        .then(() => {
-                            // Show feedback
-                            const originalText = copyCommandButton.textContent;
-                            copyCommandButton.textContent = 'Copied!';
-                            copyCommandButton.style.backgroundColor = '#27ae60';
-                            copyCommandButton.style.color = 'white';
-                            
-                            setTimeout(() => {
-                                copyCommandButton.innerHTML = `
+      document.addEventListener("DOMContentLoaded", () => {
+        // Setup copy command button
+        const copyCommandButton = document.getElementById("copy-command");
+        if (copyCommandButton) {
+          copyCommandButton.addEventListener("click", () => {
+            const command = document
+              .getElementById("login-command")
+              .textContent.trim();
+
+            navigator.clipboard
+              .writeText(command)
+              .then(() => {
+                // Show feedback
+                const originalText = copyCommandButton.textContent;
+                copyCommandButton.textContent = "Copied!";
+                copyCommandButton.style.backgroundColor = "#27ae60";
+                copyCommandButton.style.color = "white";
+
+                setTimeout(() => {
+                  copyCommandButton.innerHTML = `
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M8 4V16C8 17.1046 8.89543 18 10 18H20C21.1046 18 22 17.1046 22 16V7.41421C22 6.88378 21.7893 6.37507 21.4142 6L19 3.58579C18.6249 3.21071 18.1162 3 17.5858 3H10C8.89543 3 8 3.89543 8 5V16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                                     <path d="M16 18V20C16 21.1046 15.1046 22 14 22H4C2.89543 22 2 21.1046 2 20V9C2 7.89543 2.89543 7 4 7H6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                                 </svg>
                                 Copy`;
-                                copyCommandButton.style.backgroundColor = '';
-                                copyCommandButton.style.color = '';
-                            }, 2000);
-                        })
-                        .catch(err => {
-                            console.error('Could not copy text: ', err);
-                            alert('Failed to copy command. Please select it manually and use Ctrl+C / Cmd+C.');
-                        });
-                });
-            }
-        });
+                  copyCommandButton.style.backgroundColor = "";
+                  copyCommandButton.style.color = "";
+                }, 2000);
+              })
+              .catch((err) => {
+                console.error("Could not copy text: ", err);
+                alert(
+                  "Failed to copy command. Please select it manually and use Ctrl+C / Cmd+C."
+                );
+              });
+          });
+        }
+      });
     </script>
-</body>
+  </body>
 </html>

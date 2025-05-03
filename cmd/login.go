@@ -26,10 +26,10 @@ var loginCmd = &cobra.Command{
 Copy the generated token and paste it into the terminal prompt.
 
 Examples:
-  tiny-tunnel login tnl.campbel.io
-  tiny-tunnel login localhost:8080
-  tiny-tunnel login http://localhost:8080
-  tiny-tunnel login https://example.com:8443`,
+  tnl login tnl.campbel.io
+  tnl login localhost:8080
+  tnl login http://localhost:8080
+  tnl login https://example.com:8443`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		serverArg := args[0]
