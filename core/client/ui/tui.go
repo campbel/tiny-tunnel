@@ -16,8 +16,7 @@ import (
 var (
 	// Styles for different UI elements
 	titleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFDF5")).
-			Background(lipgloss.Color("#25A065")).
+			Foreground(lipgloss.Color("#00FF66")).
 			Bold(true).
 			Padding(0, 1)
 
@@ -34,37 +33,37 @@ var (
 				Bold(true)
 
 	statusErrorStyle = lipgloss.NewStyle().
-			   Foreground(lipgloss.Color("#FF0000")).
-			   Bold(true)
+				Foreground(lipgloss.Color("#FF0000")).
+				Bold(true)
 
 	infoStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF"))
 
 	highlightStyle = lipgloss.NewStyle().
-			  Foreground(lipgloss.Color("#25A065")).
-			  Bold(true)
+			Foreground(lipgloss.Color("#25A065")).
+			Bold(true)
 
 	subtitleStyle = lipgloss.NewStyle().
-			 Foreground(lipgloss.Color("#CCCCCC")).
-			 Padding(0, 0, 1, 2)
+			Foreground(lipgloss.Color("#CCCCCC")).
+			Padding(0, 0, 1, 2)
 
 	boxStyle = lipgloss.NewStyle().
-		   Border(lipgloss.RoundedBorder()).
-		   BorderForeground(lipgloss.Color("#555555")).
-		   Padding(0, 1)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#555555")).
+			Padding(0, 1)
 
 	// Log level styles
 	logLevelInfo = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#25A065"))
 
 	logLevelError = lipgloss.NewStyle().
-			 Foreground(lipgloss.Color("#FF0000"))
+			Foreground(lipgloss.Color("#FF0000"))
 
 	logLevelWarn = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFAA33"))
 
 	logLevelDebug = lipgloss.NewStyle().
-			 Foreground(lipgloss.Color("#888888"))
+			Foreground(lipgloss.Color("#888888"))
 )
 
 // TUI is the main terminal UI component using Bubbletea.
@@ -142,11 +141,6 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Quit the application
 			return t, tea.Quit
 
-		case "l":
-			// Toggle log view mode
-			t.state.ToggleLogViewMode()
-			return t, nil
-
 		case "o":
 			// Open the tunnel URL in a browser
 			go t.openURL(t.state.GetURL())
@@ -159,32 +153,32 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.height = msg.Height
 		t.ready = true
 
-		// Update viewport for logs
-		headerHeight := 12 // Approximate height of header content
+		// Update viewport for logs - we need less space for header now
+		headerHeight := 10 // Approximate height of header content
 		footerHeight := 2  // Height of footer
 		t.viewport = viewport.New(msg.Width, msg.Height-headerHeight-footerHeight)
 		t.viewport.Style = lipgloss.NewStyle().
 			BorderForeground(lipgloss.Color("#555555")).
+			Border(lipgloss.RoundedBorder()).
 			Padding(0, 0, 0, 1)
 
 		// Update log content in viewport
-		if t.state.IsLogViewMode() {
-			t.viewport.SetContent(t.renderLogs())
-		}
+		t.viewport.SetContent(t.renderLogs())
 
 	case tickMsg:
 		// Periodic refresh (every second)
 		t.lastRefreshTime = time.Time(msg)
-		
+
+		// Always update the logs content
+		t.viewport.SetContent(t.renderLogs())
+
 		return t, tea.Tick(time.Second, func(time.Time) tea.Msg {
 			return tickMsg(time.Now())
 		})
 
 	case stateUpdateMsg:
 		// Handle state updates
-		if t.state.IsLogViewMode() {
-			t.viewport.SetContent(t.renderLogs())
-		}
+		t.viewport.SetContent(t.renderLogs())
 	}
 
 	// Handle viewport updates
@@ -217,69 +211,72 @@ func (t *TUI) View() string {
 
 	// Get metrics
 	statsData := t.state.GetTracker()
-	wsStats := statsData.GetWebsocketStats()
 	httpStats := statsData.GetHttpStats()
-	sseStats := statsData.GetSseStats()
 
-	// Build header info
-	headerInfo := []string{
-		fmt.Sprintf("Status: %s", statusStyled),
-		fmt.Sprintf("Name: %s", highlightStyle.Render(t.state.GetName())),
-		fmt.Sprintf("Target: %s", t.state.GetTarget()),
-	}
+	// ASCII art title
+	asciiTitle := `
+ _____ _               _____                        _
+/__   (_)_ __  _   _  /__   \_   _ _ __  _ __   ___| |
+  / /\/ | '_ \| | | |   / /\/ | | | '_ \| '_ \ / _ \ |
+ / /  | | | | | |_| |  / /  | |_| | | | | | | |  __/ |
+ \/   |_|_| |_|\__, |  \/    \__,_|_| |_|_| |_|\___|_|
+               |___/
+`
 
+	// Create simplified status info with minimal text
+	var statusElements []string
+
+	// Include only the essential info
+	statusElements = append(statusElements, statusStyled)
+	statusElements = append(statusElements, highlightStyle.Render(t.state.GetName()))
+
+	// Only include URL if it exists and it's short enough
 	if t.state.GetURL() != "" {
-		headerInfo = append(headerInfo, fmt.Sprintf("URL: %s", highlightStyle.Render(t.state.GetURL())))
+		url := t.state.GetURL()
+		statusElements = append(statusElements, highlightStyle.Render(url))
 	}
 
-	if t.state.GetStatus() == stats.StatusConnected {
-		duration := t.state.GetConnectionDuration().Round(time.Second)
-		headerInfo = append(headerInfo, fmt.Sprintf("Connected for: %s", duration))
+	// Calculate dimensions
+	titleWidth := 60 // Approximate width of the ASCII art title
+	statusWidth := t.width - titleWidth - 4
+	if statusWidth < 20 {
+		statusWidth = 20 // Minimum width for status panel
 	}
 
-	// Create metrics display
-	metrics := []string{
-		fmt.Sprintf("HTTP Requests: %d", httpStats.TotalRequests),
-		fmt.Sprintf("HTTP Responses: %d", httpStats.TotalResponses),
-		fmt.Sprintf("WebSocket Connections: %d (active: %d)", wsStats.TotalConnections, wsStats.ActiveConnections),
-		fmt.Sprintf("WebSocket Messages Sent: %d", wsStats.TotalMessagesSent),
-		fmt.Sprintf("WebSocket Messages Received: %d", wsStats.TotalMessagesRecv),
-		fmt.Sprintf("SSE Connections: %d (active: %d)", sseStats.TotalConnections, sseStats.ActiveConnections),
-		fmt.Sprintf("SSE Messages Received: %d", sseStats.TotalMessagesRecv),
-	}
+	// Create a single status line with all elements joined by dots
+	statusLine := strings.Join(statusElements, " • ")
 
-	// Create main view
-	var mainContent string
+	// Add padding to align at bottom (only if there's room)
+	// Fallback if title is too short for padding
+	statusDisplay := lipgloss.NewStyle().
+		Width(statusWidth).
+		Render(statusLine)
 
-	if t.state.IsLogViewMode() {
-		// Show logs view
-		mainContent = fmt.Sprintf("%s\n%s", 
-			subtitleStyle.Render("Logs (press 'l' to return to stats)"),
-			t.viewport.View())
-	} else {
-		// Show stats view
-		headerBox := boxStyle.Render(strings.Join(headerInfo, "\n"))
-		metricsBox := boxStyle.Render(strings.Join(metrics, "\n"))
-		
-		// Show status message if available
-		statusMsg := ""
-		if msg := t.state.GetStatusMessage(); msg != "" {
-			statusMsg = boxStyle.Render(fmt.Sprintf("Message: %s", msg))
-		}
-		
-		mainContent = fmt.Sprintf("%s\n\n%s\n\n%s",
-			headerBox,
-			metricsBox,
-			statusMsg)
-	}
+	header := lipgloss.JoinVertical(lipgloss.Top,
+		titleStyle.Render(asciiTitle),
+		statusDisplay)
+
+	// Create simplified metrics bar with nicer styling
+	metricsBar := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#333333")).
+		Bold(true).
+		Padding(0, 2).
+		Align(lipgloss.Center).
+		Width(t.width).
+		Render(fmt.Sprintf("✓ %d Requests Processed", httpStats.TotalRequests))
+
+	// Show logs
+	logContent := t.viewport.View()
 
 	// Footer with instructions
-	footer := infoStyle.Render("\nPress 'q' to quit, 'l' to toggle logs, 'o' to open tunnel URL in browser")
+	footer := infoStyle.Render("\nPress 'q' to quit, 'o' to open tunnel URL in browser")
 
 	// Combine all parts
-	return fmt.Sprintf("%s\n%s\n%s",
-		titleStyle.Width(t.width).Render("Tiny Tunnel"),
-		mainContent,
+	return fmt.Sprintf("%s\n%s\n%s\n%s",
+		header,
+		metricsBar,
+		logContent,
 		footer)
 }
 
@@ -291,10 +288,11 @@ func (t *TUI) renderLogs() string {
 	}
 
 	var sb strings.Builder
-	for _, entry := range logs {
+	for i := len(logs) - 1; i >= 0; i-- {
+		entry := logs[i]
 		// Format timestamp
 		timestamp := entry.Timestamp.Format("15:04:05")
-		
+
 		// Format level with appropriate style
 		var levelStr string
 		switch strings.ToLower(entry.Level) {

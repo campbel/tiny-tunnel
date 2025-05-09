@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/campbel/tiny-tunnel/core/client/ui"
 	"github.com/campbel/tiny-tunnel/core/protocol"
@@ -40,10 +41,10 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 	tunnelState := stats.NewTunnelState(options.Target, options.Name)
 	tunnelState.SetStatus(stats.StatusConnecting)
 	tunnelState.SetStatusMessage("Connecting to server...")
-	
+
 	// Use the state provider instead of a raw tracker
 	stateProvider := stats.NewTunnelStateProvider(tunnelState)
-	
+
 	// Create the client tunnel connection
 	// Prepare headers
 	headers := options.ServerHeaders
@@ -66,16 +67,12 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		tunnelState.SetStatusMessage(fmt.Sprintf("Failed to connect: %s", err.Error()))
 		return nil, err
 	}
-	
+
 	tunnel := shared.NewTunnel(conn)
-	
+
 	// Update state after successful connection
 	tunnelState.SetStatus(stats.StatusConnected)
 	tunnelState.SetStatusMessage("Connected successfully")
-	
-	// Set the public URL based on tunnel options
-	publicURL := formatTunnelAddress(options)
-	tunnelState.SetURL(publicURL)
 
 	// Register client handlers
 	tunnel.RegisterTextHandler(func(tunnel *shared.Tunnel, id string, payload protocol.TextPayload) {
@@ -86,9 +83,15 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 			})
 			return
 		}
-		
+
 		fmt.Fprintf(options.Output(), "%s\n", payload.Text)
-		
+
+		// capture welcome message
+		if strings.HasPrefix(payload.Text, "Welcome to Tiny Tunnel!") {
+			parts := strings.Split(payload.Text, " ")
+			tunnelState.SetURL(parts[len(parts)-1])
+		}
+
 		// Add log entry to state
 		tunnelState.AddLogEntry(stats.LogEntry{
 			Timestamp: tunnel.LastReceiveTime(),
@@ -112,12 +115,16 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 	tunnel.RegisterHttpRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.HttpRequestPayload) {
 		log.Debug("handling http request", "payload", payload)
 
+		// Track request time
+		startTime := time.Now()
 		stateProvider.IncrementHttpRequest()
 
 		url_ := options.Target + payload.Path
 		req, err := http.NewRequest(payload.Method, url_, bytes.NewReader(payload.Body))
 		if err != nil {
 			log.Error("failed to create HTTP request", "error", err.Error())
+			// Log failed request
+			logHttpRequest(tunnelState, payload.Method, payload.Path, 0, 0, err)
 			return
 		}
 
@@ -134,6 +141,8 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		if err != nil {
 			stateProvider.IncrementHttpResponse()
 			tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
+			// Log failed request
+			logHttpRequest(tunnelState, payload.Method, payload.Path, 0, time.Since(startTime), err)
 			return
 		}
 		defer resp.Body.Close()
@@ -142,9 +151,17 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		if err != nil {
 			stateProvider.IncrementHttpResponse()
 			tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
+			// Log failed response reading
+			logHttpRequest(tunnelState, payload.Method, payload.Path, resp.StatusCode, time.Since(startTime), err)
 			return
 		}
-		log.Debug("sending response", "status", resp.StatusCode, "headers", resp.Header)
+
+		// Calculate elapsed time
+		elapsed := time.Since(startTime)
+		log.Debug("sending response", "status", resp.StatusCode, "elapsed", elapsed)
+
+		// Log successful request
+		logHttpRequest(tunnelState, payload.Method, payload.Path, resp.StatusCode, elapsed, nil)
 
 		stateProvider.IncrementHttpResponse()
 		tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Response: protocol.HttpResponse{
@@ -337,7 +354,7 @@ func StartTUI(ctx context.Context, tunnel *shared.Tunnel) error {
 	if !ok {
 		return errors.New("tunnel state not found")
 	}
-	
+
 	// Create and start the TUI
 	tuiInstance := ui.NewTUI(state)
 	return tuiInstance.Start()
@@ -429,4 +446,57 @@ func parseServerURL(server string) (*url.URL, error) {
 	}
 
 	return parsedURL, nil
+}
+
+// logHttpRequest logs detailed information about HTTP requests
+func logHttpRequest(state *stats.TunnelState, method, path string, statusCode int, elapsed time.Duration, err error) {
+	// Create a log entry with HTTP request details
+	entry := stats.LogEntry{
+		Timestamp: time.Now(),
+		Level:     "info",
+		Fields: map[string]interface{}{
+			"method": method,
+			"path":   path,
+		},
+	}
+
+	// Format the message based on success or failure
+	if err != nil {
+		entry.Level = "error"
+		if statusCode > 0 {
+			entry.Message = fmt.Sprintf("%s %s - %d ERROR: %s (%.2fms)",
+				method, path, statusCode, err.Error(), float64(elapsed.Microseconds())/1000)
+		} else {
+			entry.Message = fmt.Sprintf("%s %s - ERROR: %s",
+				method, path, err.Error())
+		}
+	} else {
+		// Format status code with color indicators
+		var statusIndicator string
+		if statusCode >= 200 && statusCode < 300 {
+			statusIndicator = "✓" // Success
+			entry.Level = "info"
+		} else if statusCode >= 300 && statusCode < 400 {
+			statusIndicator = "↪" // Redirect
+			entry.Level = "info"
+		} else if statusCode >= 400 && statusCode < 500 {
+			statusIndicator = "⚠" // Client error
+			entry.Level = "warn"
+		} else {
+			statusIndicator = "✗" // Server error
+			entry.Level = "error"
+		}
+
+		// Format the duration
+		durationMs := float64(elapsed.Microseconds()) / 1000
+
+		entry.Message = fmt.Sprintf("%s %s - %d %s (%.2fms)",
+			method, path, statusCode, statusIndicator, durationMs)
+
+		entry.Fields["status"] = statusCode
+		entry.Fields["duration_ms"] = durationMs
+	}
+
+	// Add the log entry to the state
+	state.AddLogEntry(entry)
 }
