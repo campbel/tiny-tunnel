@@ -67,25 +67,20 @@ var startCmd = &cobra.Command{
 			}
 		}
 
-		log.Info("connecting...", "server", options.ServerHost, "port", options.ServerPort, "insecure", options.Insecure)
-		
-		// Create and establish the tunnel connection
-		tunnel, err := client.NewTunnel(cmd.Context(), options)
-		if err != nil {
-			log.Error("error connecting to tunnel", "err", err)
-			return err
-		}
-		
-		log.Info("connected", "server", options.ServerHost, "port", options.ServerPort, "insecure", options.Insecure)
-		
 		// If TUI is enabled, start it in a separate goroutine before entering the listen loop
 		if enableTUI {
+			// Create and establish the tunnel connection
+			tunnel, err := client.NewTunnel(cmd.Context(), options)
+			if err != nil {
+				log.Error("error connecting to tunnel", "err", err)
+				return err
+			}
 			go func() {
 				if err := client.StartTUI(cmd.Context(), tunnel); err != nil {
 					log.Error("error starting TUI", "err", err)
 				}
 			}()
-			
+
 			// TUI handles the context cancellation for proper shutdown
 			tunnel.Listen(cmd.Context())
 		} else {
@@ -96,6 +91,7 @@ var startCmd = &cobra.Command{
 				case <-cmd.Context().Done():
 					break LOOP
 				default:
+					log.Info("connecting...", "server", options.ServerHost, "port", options.ServerPort, "insecure", options.Insecure)
 					tunnel, err := client.NewTunnel(cmd.Context(), options)
 					if err != nil {
 						log.Error("error connecting to tunnel", "err", err)

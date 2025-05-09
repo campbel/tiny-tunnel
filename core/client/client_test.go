@@ -250,18 +250,24 @@ func setupTestScenario(t *testing.T, ctx context.Context, handler func(w http.Re
 	if err != nil {
 		t.Fatal(err)
 	}
-	tracker := new(stats.Tracker)
+	// Create a tunnel with options
 	client, err := client.NewTunnel(ctx, client.Options{
 		ServerHost: url.Hostname(),
 		ServerPort: url.Port(),
 		Insecure:   true,
 		Target:     appServer.URL,
-		Tracker:    tracker,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	go client.Listen(ctx)
+
+	// Extract the tracker from the tunnel state
+	state, ok := client.GetContext("state").(*stats.TunnelState)
+	if !ok {
+		t.Fatal("tunnel state not found")
+	}
+	tracker := state.GetTracker()
 
 	return client, conn, responseChan, tracker
 }
