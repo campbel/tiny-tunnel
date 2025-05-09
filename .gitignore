@@ -2,3 +2,4 @@ temp
 tmp
 .envrc
 .bolt
+**/.claude/settings.local.json

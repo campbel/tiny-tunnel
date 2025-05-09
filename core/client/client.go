@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/campbel/tiny-tunnel/core/client/ui"
 	"github.com/campbel/tiny-tunnel/core/protocol"
 	"github.com/campbel/tiny-tunnel/core/shared"
 	"github.com/campbel/tiny-tunnel/core/stats"
@@ -35,14 +37,15 @@ var (
 )
 
 func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
-	tracker := options.Tracker
-	if tracker == nil {
-		tracker = new(stats.Tracker)
-	}
+	// Create the state manager
+	tunnelState := stats.NewTunnelState(options.Target, options.Name)
+	tunnelState.SetStatus(stats.StatusConnecting)
+	tunnelState.SetStatusMessage("Connecting to server...")
 
-	//
+	// Use the state provider instead of a raw tracker
+	stateProvider := stats.NewTunnelStateProvider(tunnelState)
+
 	// Create the client tunnel connection
-	//
 	// Prepare headers
 	headers := options.ServerHeaders
 	if headers == nil {
@@ -54,15 +57,24 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		headers.Set("X-Auth-Token", token)
 	}
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, options.URL(), headers)
+	// Update state before connection attempt
+	tunnelURL := options.URL()
+	tunnelState.SetStatusMessage(fmt.Sprintf("Connecting to %s...", tunnelURL))
+
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, tunnelURL, headers)
 	if err != nil {
+		tunnelState.SetStatus(stats.StatusError)
+		tunnelState.SetStatusMessage(fmt.Sprintf("Failed to connect: %s", err.Error()))
 		return nil, err
 	}
+
 	tunnel := shared.NewTunnel(conn)
 
-	//
+	// Update state after successful connection
+	tunnelState.SetStatus(stats.StatusConnected)
+	tunnelState.SetStatusMessage("Connected successfully")
+
 	// Register client handlers
-	//
 	tunnel.RegisterTextHandler(func(tunnel *shared.Tunnel, id string, payload protocol.TextPayload) {
 		if payload.Text == "ping" {
 			log.Debug("received ping", "id", id)
@@ -71,15 +83,26 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 			})
 			return
 		}
+
 		fmt.Fprintf(options.Output(), "%s\n", payload.Text)
+
+		// capture welcome message
+		if strings.HasPrefix(payload.Text, "Welcome to Tiny Tunnel!") {
+			parts := strings.Split(payload.Text, " ")
+			tunnelState.SetURL(parts[len(parts)-1])
+		}
+
+		// Add log entry to state
+		tunnelState.AddLogEntry(stats.LogEntry{
+			Timestamp: tunnel.LastReceiveTime(),
+			Level:     "info",
+			Message:   payload.Text,
+		})
 	})
 
-	//
 	// HTTP
-	//
 	// Requests are sent to the target and response send back to the server.
 	// Each request is 1:1 to a response which makes this fairly trivial.
-	//
 	httpClient = &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -92,12 +115,16 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 	tunnel.RegisterHttpRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.HttpRequestPayload) {
 		log.Debug("handling http request", "payload", payload)
 
-		tracker.IncrementHttpRequest()
+		// Track request time
+		startTime := time.Now()
+		stateProvider.IncrementHttpRequest()
 
 		url_ := options.Target + payload.Path
 		req, err := http.NewRequest(payload.Method, url_, bytes.NewReader(payload.Body))
 		if err != nil {
 			log.Error("failed to create HTTP request", "error", err.Error())
+			// Log failed request
+			logHttpRequest(tunnelState, payload.Method, payload.Path, 0, 0, err)
 			return
 		}
 
@@ -112,21 +139,31 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			tracker.IncrementHttpResponse()
+			stateProvider.IncrementHttpResponse()
 			tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
+			// Log failed request
+			logHttpRequest(tunnelState, payload.Method, payload.Path, 0, time.Since(startTime), err)
 			return
 		}
 		defer resp.Body.Close()
 
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
-			tracker.IncrementHttpResponse()
+			stateProvider.IncrementHttpResponse()
 			tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
+			// Log failed response reading
+			logHttpRequest(tunnelState, payload.Method, payload.Path, resp.StatusCode, time.Since(startTime), err)
 			return
 		}
-		log.Debug("sending response", "status", resp.StatusCode, "headers", resp.Header)
 
-		tracker.IncrementHttpResponse()
+		// Calculate elapsed time
+		elapsed := time.Since(startTime)
+		log.Debug("sending response", "status", resp.StatusCode, "elapsed", elapsed)
+
+		// Log successful request
+		logHttpRequest(tunnelState, payload.Method, payload.Path, resp.StatusCode, elapsed, nil)
+
+		stateProvider.IncrementHttpResponse()
 		tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Response: protocol.HttpResponse{
 			Status:  resp.StatusCode,
 			Headers: resp.Header,
@@ -134,13 +171,10 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		}})
 	})
 
-	//
 	// Websockets
-	//
 	// For websockets, we must establish connections and store a reference to them in the session map.
 	// Each connection is given a session ID as its identifier and passed back to the server in the response.
 	// The server will use this ID to send messages to the client in the future.
-	//
 	wsSessions := safe.NewMap[string, *safe.WSConn]()
 
 	tunnel.RegisterWebsocketCreateRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketCreateRequestPayload) {
@@ -164,7 +198,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		}
 
 		conn := safe.NewWSConn(rawConn)
-		tracker.IncrementWebsocketConnection()
+		stateProvider.IncrementWebsocketConnection()
 
 		sessionID := uuid.New().String()
 		if ok := wsSessions.SetNX(sessionID, conn); !ok {
@@ -186,7 +220,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 				log.Info("closing websocket connection", "session_id", sessionID)
 				conn.Close()
 				wsSessions.Delete(sessionID)
-				tracker.DecrementWebsocketConnection()
+				stateProvider.DecrementWebsocketConnection()
 			}()
 
 			for {
@@ -195,7 +229,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 					log.Error("exiting websocket read loop", "error", err.Error(), "session_id", sessionID)
 					break
 				}
-				tracker.IncrementWebsocketMessageRecv()
+				stateProvider.IncrementWebsocketMessageRecv()
 				log.Debug("read ws message", "session_id", sessionID, "kind", mt, "data", string(data))
 				if err := tunnel.Send(protocol.MessageKindWebsocketMessage, &protocol.WebsocketMessagePayload{SessionID: sessionID, Kind: mt, Data: data}); err != nil {
 					log.Error("failed to send websocket message", "error", err.Error())
@@ -214,7 +248,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		if err := conn.WriteMessage(payload.Kind, payload.Data); err != nil {
 			log.Error("failed to write websocket message", "error", err.Error())
 		}
-		tracker.IncrementWebsocketMessageSent()
+		stateProvider.IncrementWebsocketMessageSent()
 	})
 
 	tunnel.RegisterWebsocketCloseHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketClosePayload) {
@@ -230,16 +264,10 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		wsSessions.Delete(payload.SessionID)
 	})
 
-	//
 	// Server-Sent Events
-	//
-	// SSE is more complex than HTTP, but simpler than websockets. We must establish the connection,
-	// then read the data and send it back to the server until a connection close request is received
-	// or until the connection is closed by the server.
-	//
 	tunnel.RegisterSSERequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.SSERequestPayload) {
-		tracker.IncrementSseConnection()
-		defer tracker.DecrementSseConnection()
+		stateProvider.IncrementSseConnection()
+		defer stateProvider.DecrementSseConnection()
 
 		req, err := http.NewRequest(http.MethodGet, options.Target+payload.Path, nil)
 		if err != nil {
@@ -265,7 +293,7 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		for scanner.Scan() {
 			text := scanner.Text()
 			if strings.HasPrefix(text, "data:") {
-				tracker.IncrementSseMessageRecv()
+				stateProvider.IncrementSseMessageRecv()
 			}
 			tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{Data: text})
 		}
@@ -274,7 +302,62 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		defer resp.Body.Close()
 	})
 
+	// Store the state provider in the tunnel for access by the client
+	tunnel.SetContext("state", tunnelState)
+
 	return tunnel, nil
+}
+
+// formatTunnelAddress creates a formatted tunnel address for the TUI display
+func formatTunnelAddress(options Options) string {
+	// Extract hostname and port
+	host := options.ServerHost
+	port := options.ServerPort
+
+	// Parse hostname if it contains port
+	hostParts := strings.Split(host, ":")
+	if len(hostParts) > 1 {
+		host = hostParts[0]
+		// Use explicit port or the port from hostname
+		if port == "" {
+			port = hostParts[1]
+		}
+	}
+
+	// Get port from config if not specified
+	if port == "" {
+		if serverInfo, err := options.GetServerInfo(); err == nil && serverInfo.Port != "" {
+			port = serverInfo.Port
+		} else {
+			// Default ports
+			if options.Insecure {
+				port = "80"
+			} else {
+				port = "443"
+			}
+		}
+	}
+
+	scheme := "https"
+	if options.Insecure {
+		scheme = "http"
+	}
+
+	return fmt.Sprintf("%s://%s.%s:%s", scheme, options.Name, host, port)
+}
+
+// StartTUI creates and starts a TUI for the given tunnel.
+// It should be called after the tunnel is successfully established.
+func StartTUI(ctx context.Context, tunnel *shared.Tunnel) error {
+	// Get the state from the tunnel
+	state, ok := tunnel.GetContext("state").(*stats.TunnelState)
+	if !ok {
+		return errors.New("tunnel state not found")
+	}
+
+	// Create and start the TUI
+	tuiInstance := ui.NewTUI(state)
+	return tuiInstance.Start()
 }
 
 // TestAuth verifies if the token is valid by making a request to the auth-test endpoint
@@ -363,4 +446,57 @@ func parseServerURL(server string) (*url.URL, error) {
 	}
 
 	return parsedURL, nil
+}
+
+// logHttpRequest logs detailed information about HTTP requests
+func logHttpRequest(state *stats.TunnelState, method, path string, statusCode int, elapsed time.Duration, err error) {
+	// Create a log entry with HTTP request details
+	entry := stats.LogEntry{
+		Timestamp: time.Now(),
+		Level:     "info",
+		Fields: map[string]interface{}{
+			"method": method,
+			"path":   path,
+		},
+	}
+
+	// Format the message based on success or failure
+	if err != nil {
+		entry.Level = "error"
+		if statusCode > 0 {
+			entry.Message = fmt.Sprintf("%s %s - %d ERROR: %s (%.2fms)",
+				method, path, statusCode, err.Error(), float64(elapsed.Microseconds())/1000)
+		} else {
+			entry.Message = fmt.Sprintf("%s %s - ERROR: %s",
+				method, path, err.Error())
+		}
+	} else {
+		// Format status code with color indicators
+		var statusIndicator string
+		if statusCode >= 200 && statusCode < 300 {
+			statusIndicator = "✓" // Success
+			entry.Level = "info"
+		} else if statusCode >= 300 && statusCode < 400 {
+			statusIndicator = "↪" // Redirect
+			entry.Level = "info"
+		} else if statusCode >= 400 && statusCode < 500 {
+			statusIndicator = "⚠" // Client error
+			entry.Level = "warn"
+		} else {
+			statusIndicator = "✗" // Server error
+			entry.Level = "error"
+		}
+
+		// Format the duration
+		durationMs := float64(elapsed.Microseconds()) / 1000
+
+		entry.Message = fmt.Sprintf("%s %s - %d %s (%.2fms)",
+			method, path, statusCode, statusIndicator, durationMs)
+
+		entry.Fields["status"] = statusCode
+		entry.Fields["duration_ms"] = durationMs
+	}
+
+	// Add the log entry to the state
+	state.AddLogEntry(entry)
 }

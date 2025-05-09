@@ -27,6 +27,14 @@ type Tunnel struct {
 
 	// Handlers
 	handlerRegistry map[int]func(tunnel *Tunnel, id string, payload []byte)
+	
+	// Context for storing arbitrary data
+	context     map[string]interface{}
+	contextMu   sync.RWMutex
+	
+	// Track last time a message was received
+	lastReceiveTime time.Time
+	lastReceiveMu   sync.RWMutex
 }
 
 func NewTunnel(conn *websocket.Conn) *Tunnel {
@@ -35,6 +43,8 @@ func NewTunnel(conn *websocket.Conn) *Tunnel {
 		responseChannels: safe.NewMap[string, []chan protocol.Message](),
 		closeChan:        make(chan struct{}),
 		handlerRegistry:  make(map[int]func(tunnel *Tunnel, id string, payload []byte)),
+		context:          make(map[string]interface{}),
+		lastReceiveTime:  time.Now(),
 	}
 }
 
@@ -130,6 +140,11 @@ func (t *Tunnel) Listen(ctx context.Context) {
 				return
 			}
 		}
+		
+		// Update last receive time
+		t.lastReceiveMu.Lock()
+		t.lastReceiveTime = time.Now()
+		t.lastReceiveMu.Unlock()
 
 		// Handle the message
 		go func(msg protocol.Message) {
@@ -159,6 +174,27 @@ func (t *Tunnel) Listen(ctx context.Context) {
 			}
 		}(msg)
 	}
+}
+
+// SetContext stores a value in the tunnel's context with the given key.
+func (t *Tunnel) SetContext(key string, value interface{}) {
+	t.contextMu.Lock()
+	defer t.contextMu.Unlock()
+	t.context[key] = value
+}
+
+// GetContext retrieves a value from the tunnel's context by key.
+func (t *Tunnel) GetContext(key string) interface{} {
+	t.contextMu.RLock()
+	defer t.contextMu.RUnlock()
+	return t.context[key]
+}
+
+// LastReceiveTime returns the time when the last message was received.
+func (t *Tunnel) LastReceiveTime() time.Time {
+	t.lastReceiveMu.RLock()
+	defer t.lastReceiveMu.RUnlock()
+	return t.lastReceiveTime
 }
 
 func (t *Tunnel) registerHandler(kind int, handler func(tunnel *Tunnel, id string, payload []byte)) {
