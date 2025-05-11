@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/internal/log"
@@ -111,14 +112,57 @@ func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create response channel for initial setup
-	responseChannel := make(chan protocol.Message)
+	// Create buffered response channel for better ordering
+	responseChannel := make(chan protocol.Message, 100) // Buffer size to reduce chances of out-of-order delivery
 
 	// Notify client about the SSE request
 	s.tunnel.Send(protocol.MessageKindSSERequest, &protocol.SSERequestPayload{
 		Path:    r.URL.Path + "?" + r.URL.Query().Encode(),
 		Headers: r.Header,
 	}, responseChannel)
+
+	// Create a buffer to hold out-of-order messages until they can be delivered in order
+	messageBuffer := make(map[int]protocol.SSEMessagePayload)
+	expectedSequence := 0
+
+	// Create a serialization point with a mutex to ensure ordered writes
+	var writeMutex sync.Mutex
+
+	// Function to handle writing SSE messages in a synchronized manner
+	writeSSEMessage := func(data string) {
+		writeMutex.Lock()
+		defer writeMutex.Unlock()
+
+		log.Debug("writing SSE message", "data", data)
+		fmt.Fprintf(w, data+"\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}
+
+	// Function to process buffered messages in order
+	processBufferedMessages := func() {
+		writeMutex.Lock()
+		defer writeMutex.Unlock()
+
+		// Keep processing messages as long as we have the next expected sequence
+		for {
+			msg, ok := messageBuffer[expectedSequence]
+			if !ok {
+				break // Don't have the next message yet
+			}
+
+			// Write the message and remove it from the buffer
+			log.Debug("writing buffered SSE message", "sequence", expectedSequence, "data", msg.Data)
+			fmt.Fprintf(w, msg.Data+"\n\n")
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+
+			delete(messageBuffer, expectedSequence)
+			expectedSequence++
+		}
+	}
 
 	for response := range responseChannel {
 		if response.Kind == protocol.MessageKindSSEClose {
@@ -135,10 +179,21 @@ func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Debug("received SSE message", "data", sseMessage.Data)
-		fmt.Fprintf(w, sseMessage.Data+"\n\n")
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
+		// Handle message based on sequence number
+		if sseMessage.Sequence == expectedSequence {
+			// This is the message we're expecting next, write it immediately
+			writeSSEMessage(sseMessage.Data)
+			expectedSequence++
+
+			// Check if we have subsequent messages buffered
+			processBufferedMessages()
+		} else if sseMessage.Sequence > expectedSequence {
+			// This message arrived early, buffer it for later
+			log.Debug("buffering out-of-order SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
+			messageBuffer[sseMessage.Sequence] = sseMessage
+		} else {
+			// This message is a duplicate or arrived very late (we already processed past this sequence)
+			log.Warn("received outdated SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
 		}
 	}
 	log.Debug("SSE connection closed")

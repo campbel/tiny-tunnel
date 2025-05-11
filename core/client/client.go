@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/core/client/ui"
@@ -292,17 +293,39 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		scanner := bufio.NewScanner(resp.Body)
 		var messageBuilder strings.Builder
 
+		// Use a mutex to synchronize sending messages and ensure order is preserved
+		var sendMutex sync.Mutex
+
+		// Track sequence number to ensure messages are ordered
+		sequenceNumber := 0
+
+		// Create a function to send messages in a synchronized way
+		sendMessage := func(message string) {
+			if message == "" {
+				return
+			}
+
+			sendMutex.Lock()
+			defer sendMutex.Unlock()
+
+			currentSequence := sequenceNumber
+			sequenceNumber++
+
+			if err := tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{
+				Data:     message,
+				Sequence: currentSequence,
+			}); err != nil {
+				log.Error("failed to send SSE message", "error", err.Error())
+			}
+		}
+
 		for scanner.Scan() {
 			line := scanner.Text()
 			// Empty line indicates end of message
 			if line == "" {
 				message := messageBuilder.String()
 				if message != "" {
-					if err := tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{
-						Data: message,
-					}); err != nil {
-						log.Error("failed to send SSE message", "error", err.Error())
-					}
+					sendMessage(message)
 					messageBuilder.Reset()
 				}
 				continue
@@ -317,16 +340,16 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 
 		// Send any remaining message
 		if messageBuilder.Len() > 0 {
-			if err := tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{
-				Data: messageBuilder.String(),
-			}); err != nil {
-				log.Error("failed to send SSE message", "error", err.Error())
-			}
+			sendMessage(messageBuilder.String())
 		}
 
+		// Lock to ensure the close message is sent after all data messages
+		sendMutex.Lock()
 		if err := tunnel.SendResponse(protocol.MessageKindSSEClose, id, &protocol.SSEClosePayload{}); err != nil {
 			log.Error("failed to send SSE close", "error", err.Error())
 		}
+		sendMutex.Unlock()
+
 		defer resp.Body.Close()
 	})
 

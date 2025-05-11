@@ -94,6 +94,66 @@ func TestHttpPayloads(t *testing.T) {
 	}
 }
 
+func TestSSEPayloads(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload interface{}
+	}{
+		{
+			name: "sse request",
+			payload: SSERequestPayload{
+				Path:   "/events",
+				Headers: http.Header{"Accept": []string{"text/event-stream"}},
+			},
+		},
+		{
+			name: "sse message without sequence",
+			payload: SSEMessagePayload{
+				Data: "event: update\ndata: {\"count\":1}",
+			},
+		},
+		{
+			name: "sse message with sequence",
+			payload: SSEMessagePayload{
+				Data:     "event: update\ndata: {\"count\":2}",
+				Sequence: 5,
+			},
+		},
+		{
+			name: "sse close",
+			payload: SSEClosePayload{
+				Error: "connection closed",
+				Timestamp: "2023-05-11T10:30:00Z",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.payload)
+			assert.NoError(t, err)
+
+			switch p := tt.payload.(type) {
+			case SSERequestPayload:
+				var decoded SSERequestPayload
+				err = json.Unmarshal(data, &decoded)
+				assert.NoError(t, err)
+				assert.Equal(t, p, decoded)
+			case SSEMessagePayload:
+				var decoded SSEMessagePayload
+				err = json.Unmarshal(data, &decoded)
+				assert.NoError(t, err)
+				assert.Equal(t, p, decoded)
+			case SSEClosePayload:
+				var decoded SSEClosePayload
+				err = json.Unmarshal(data, &decoded)
+				assert.NoError(t, err)
+				assert.Equal(t, p, decoded)
+			}
+		})
+	}
+}
+
 func TestWebsocketPayloads(t *testing.T) {
 	tests := []struct {
 		name    string
