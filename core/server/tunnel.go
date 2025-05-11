@@ -35,9 +35,11 @@ func NewTunnel(conn *websocket.Conn, options TunnelOptions) *Tunnel {
 	}
 
 	if options.HelloMessage != "" {
-		server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
+		if err := server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
 			Text: options.HelloMessage,
-		})
+		}); err != nil {
+			log.Error("failed to send hello message", "error", err.Error())
+		}
 	}
 
 	ticker := time.NewTicker(15 * time.Second)
@@ -46,9 +48,11 @@ func NewTunnel(conn *websocket.Conn, options TunnelOptions) *Tunnel {
 			if server.tunnel.IsClosed() {
 				return
 			}
-			server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
+			if err := server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
 				Text: "ping",
-			})
+			}); err != nil {
+				log.Error("failed to send ping message", "error", err.Error())
+			}
 		}
 	}()
 
@@ -116,10 +120,15 @@ func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
 	responseChannel := make(chan protocol.Message, 100) // Buffer size to reduce chances of out-of-order delivery
 
 	// Notify client about the SSE request
-	s.tunnel.Send(protocol.MessageKindSSERequest, &protocol.SSERequestPayload{
+	clean, err := s.tunnel.SendWithResponseChannel(protocol.MessageKindSSERequest, &protocol.SSERequestPayload{
 		Path:    r.URL.Path + "?" + r.URL.Query().Encode(),
 		Headers: r.Header,
 	}, responseChannel)
+	if err != nil {
+		log.Error("failed to send SSE request", "error", err.Error())
+		return
+	}
+	defer clean()
 
 	// Create a buffer to hold out-of-order messages until they can be delivered in order
 	messageBuffer := make(map[int]protocol.SSEMessagePayload)
@@ -246,12 +255,17 @@ func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	s.tunnel.Send(protocol.MessageKindHttpRequest, &protocol.HttpRequestPayload{
+	clean, err := s.tunnel.SendWithResponseChannel(protocol.MessageKindHttpRequest, &protocol.HttpRequestPayload{
 		Method:  r.Method,
 		Path:    r.URL.Path + "?" + r.URL.Query().Encode(),
 		Headers: r.Header,
 		Body:    bodyBytes,
 	}, responseChannel)
+	if err != nil {
+		log.Error("failed to send HTTP request", "error", err.Error())
+		return
+	}
+	defer clean()
 
 	response := <-responseChannel
 
@@ -294,10 +308,15 @@ func (s *Tunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) 
 	conn := safe.NewWSConn(rawConn)
 
 	responseChannel := make(chan protocol.Message)
-	s.tunnel.Send(protocol.MessageKindWebsocketCreateRequest, &protocol.WebsocketCreateRequestPayload{
+	clean, err := s.tunnel.SendWithResponseChannel(protocol.MessageKindWebsocketCreateRequest, &protocol.WebsocketCreateRequestPayload{
 		Origin: r.Header.Get("Origin"),
 		Path:   r.URL.Path,
 	}, responseChannel)
+	if err != nil {
+		log.Error("failed to send websocket create request", "error", err.Error())
+		return
+	}
+	defer clean()
 
 	response := <-responseChannel
 
