@@ -298,7 +298,6 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 			if line == "" {
 				message := messageBuilder.String()
 				if message != "" {
-					fmt.Println("sending message", message)
 					if err := tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{
 						Data: message,
 					}); err != nil {
