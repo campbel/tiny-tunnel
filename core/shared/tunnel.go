@@ -19,8 +19,12 @@ type Tunnel struct {
 	// closure
 	isClosed     bool
 	closeHandler func()
-	closeChan    chan struct{}
+	closeChan    chan struct{} // Channel to signal tunnel closure
 	closeMu      sync.Mutex
+
+	// For context management and cleanup
+	ctx        context.Context
+	cancelFunc context.CancelFunc
 
 	// responseChannels is a map of message IDs to channels that want to receive the response
 	responseChannels *safe.Map[string, []chan protocol.Message]
@@ -38,6 +42,7 @@ type Tunnel struct {
 }
 
 func NewTunnel(conn *websocket.Conn) *Tunnel {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Tunnel{
 		conn:             safe.NewWSConn(conn),
 		responseChannels: safe.NewMap[string, []chan protocol.Message](),
@@ -45,6 +50,8 @@ func NewTunnel(conn *websocket.Conn) *Tunnel {
 		handlerRegistry:  make(map[int]func(tunnel *Tunnel, id string, payload []byte)),
 		context:          make(map[string]interface{}),
 		lastReceiveTime:  time.Now(),
+		ctx:              ctx,
+		cancelFunc:       cancel,
 	}
 }
 
@@ -70,12 +77,37 @@ func (t *Tunnel) close(peerSent bool) {
 		return
 	}
 
-	if !peerSent {
-		t.conn.Conn().WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second))
-	}
+	// Mark as closed first to prevent new messages from being sent
 	t.isClosed = true
+
+	// Cancel the context to notify dependent goroutines
+	if t.cancelFunc != nil {
+		t.cancelFunc()
+	}
+
+	// Close the channel to notify any goroutines waiting
 	close(t.closeChan)
-	t.conn.Close()
+
+	// Clear any response channels to prevent goroutines from blocking
+	t.responseChannels.Range(func(key string, value []chan protocol.Message) bool {
+		for _, ch := range value {
+			// Try to close each channel, ignoring if already closed
+			defer func() {
+				recover() // Recover from panic if channel is already closed
+			}()
+			close(ch)
+		}
+		return true
+	})
+
+	// Close the connection with timeout
+	if !peerSent {
+		t.conn.CloseWithTimeout(time.Second)
+	} else {
+		t.conn.Close()
+	}
+
+	// Call the close handler if set
 	if t.closeHandler != nil {
 		t.closeHandler()
 	}
@@ -208,6 +240,16 @@ func (t *Tunnel) LastReceiveTime() time.Time {
 	t.lastReceiveMu.RLock()
 	defer t.lastReceiveMu.RUnlock()
 	return t.lastReceiveTime
+}
+
+// Context returns the tunnel's context, which is cancelled when the tunnel is closed
+func (t *Tunnel) Context() context.Context {
+	return t.ctx
+}
+
+// Done returns a channel that's closed when the tunnel is closed
+func (t *Tunnel) Done() <-chan struct{} {
+	return t.closeChan
 }
 
 func (t *Tunnel) registerHandler(kind int, handler func(tunnel *Tunnel, id string, payload []byte)) {
