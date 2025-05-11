@@ -270,7 +270,21 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		stateProvider.IncrementSseConnection()
 		defer stateProvider.DecrementSseConnection()
 
-		req, err := http.NewRequest(http.MethodGet, options.Target+payload.Path, nil)
+		// Create a context for this SSE request that will be cancelled when the tunnel is closed
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Handle tunnel closure by canceling the context
+		go func() {
+			select {
+			case <-tunnel.Done():
+				cancel()
+			case <-ctx.Done():
+				// Context already cancelled
+			}
+		}()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Target+payload.Path, nil)
 		if err != nil {
 			log.Error("failed to create SSE request", "error", err.Error())
 			return
@@ -284,13 +298,23 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		// We don't need to add token to SSE requests as tunnel access doesn't require auth
 		// The token is only needed for /register endpoint which is handled during initial websocket connection
 
-		resp, err := httpClient.Do(req)
+		// Use a client with context
+		client := &http.Client{
+			Timeout: 10 * time.Second,
+		}
+		resp, err := client.Do(req)
 		if err != nil {
+			if ctx.Err() != nil {
+				// Context was cancelled, this is expected
+				return
+			}
 			log.Error("failed to send SSE request", "error", err.Error())
 			return
 		}
+		defer resp.Body.Close()
 
-		scanner := bufio.NewScanner(resp.Body)
+		// Use a buffered reader for better performance
+		reader := bufio.NewReaderSize(resp.Body, 4096)
 		var messageBuilder strings.Builder
 
 		// Use a mutex to synchronize sending messages and ensure order is preserved
@@ -299,9 +323,9 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		// Track sequence number to ensure messages are ordered
 		sequenceNumber := 0
 
-		// Create a function to send messages in a synchronized way
+		// Create a function to send messages in a synchronized way with context awareness
 		sendMessage := func(message string) {
-			if message == "" {
+			if message == "" || tunnel.IsClosed() {
 				return
 			}
 
@@ -319,38 +343,83 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 			}
 		}
 
-		for scanner.Scan() {
-			line := scanner.Text()
-			// Empty line indicates end of message
-			if line == "" {
-				message := messageBuilder.String()
-				if message != "" {
-					sendMessage(message)
-					messageBuilder.Reset()
+		// Safely try to send a close message at the end
+		sendClose := func() {
+			if tunnel.IsClosed() {
+				return
+			}
+
+			sendMutex.Lock()
+			defer sendMutex.Unlock()
+
+			if err := tunnel.SendResponse(protocol.MessageKindSSEClose, id, &protocol.SSEClosePayload{}); err != nil {
+				log.Error("failed to send SSE close", "error", err.Error())
+			}
+		}
+		defer sendClose()
+
+		done := make(chan struct{})
+		doneOnce := &sync.Once{}
+
+		// Safely close the done channel
+		closeDone := func() {
+			doneOnce.Do(func() {
+				close(done)
+			})
+		}
+
+		// Handle context cancellation in a separate goroutine
+		go func() {
+			select {
+			case <-ctx.Done():
+				// Try to unblock any read by setting a deadline
+				if deadline, ok := resp.Body.(interface{ SetReadDeadline(time.Time) error }); ok {
+					_ = deadline.SetReadDeadline(time.Now())
 				}
-				continue
+				closeDone()
+			case <-done:
+				// Reading finished normally
+			}
+		}()
+
+		// Read using scanner with done channel for cancellation
+		go func() {
+			defer closeDone()
+
+			scanner := bufio.NewScanner(reader)
+			for scanner.Scan() {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					line := scanner.Text()
+
+					// Empty line indicates end of message
+					if line == "" {
+						message := messageBuilder.String()
+						if message != "" {
+							sendMessage(message)
+							messageBuilder.Reset()
+						}
+						continue
+					}
+
+					// Add line to current message
+					if messageBuilder.Len() > 0 {
+						messageBuilder.WriteString("\n")
+					}
+					messageBuilder.WriteString(line)
+				}
 			}
 
-			// Add line to current message
+			// Send any remaining message
 			if messageBuilder.Len() > 0 {
-				messageBuilder.WriteString("\n")
+				sendMessage(messageBuilder.String())
 			}
-			messageBuilder.WriteString(line)
-		}
+		}()
 
-		// Send any remaining message
-		if messageBuilder.Len() > 0 {
-			sendMessage(messageBuilder.String())
-		}
-
-		// Lock to ensure the close message is sent after all data messages
-		sendMutex.Lock()
-		if err := tunnel.SendResponse(protocol.MessageKindSSEClose, id, &protocol.SSEClosePayload{}); err != nil {
-			log.Error("failed to send SSE close", "error", err.Error())
-		}
-		sendMutex.Unlock()
-
-		defer resp.Body.Close()
+		// Wait for either the context to be cancelled or reading to finish
+		<-done
 	})
 
 	// Store the state provider in the tunnel for access by the client
