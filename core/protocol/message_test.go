@@ -70,7 +70,7 @@ func TestHttpPayloads(t *testing.T) {
 				Headers: http.Header{
 					"Content-Type":  []string{"application/json"},
 					"Authorization": []string{"Bearer token"},
-					"X-Request-ID": []string{"123"},
+					"X-Request-ID":  []string{"123"},
 				},
 				Body: []byte(`{"status":"updated"}`),
 			},
@@ -85,7 +85,7 @@ func TestHttpPayloads(t *testing.T) {
 			var decoded HttpRequestPayload
 			err = json.Unmarshal(data, &decoded)
 			assert.NoError(t, err)
-			
+
 			assert.Equal(t, tt.payload.Method, decoded.Method)
 			assert.Equal(t, tt.payload.Path, decoded.Path)
 			assert.Equal(t, tt.payload.Headers, decoded.Headers)
@@ -102,7 +102,7 @@ func TestSSEPayloads(t *testing.T) {
 		{
 			name: "sse request",
 			payload: SSERequestPayload{
-				Path:   "/events",
+				Path:    "/events",
 				Headers: http.Header{"Accept": []string{"text/event-stream"}},
 			},
 		},
@@ -123,7 +123,6 @@ func TestSSEPayloads(t *testing.T) {
 			name: "sse close",
 			payload: SSEClosePayload{
 				Error: "connection closed",
-				Timestamp: "2023-05-11T10:30:00Z",
 			},
 		},
 	}
@@ -171,7 +170,7 @@ func TestWebsocketPayloads(t *testing.T) {
 			payload: WebsocketMessagePayload{
 				SessionID: "session123",
 				Kind:      1, // binary
-				Data:     []byte("hello websocket"),
+				Data:      []byte("hello websocket"),
 			},
 		},
 		{

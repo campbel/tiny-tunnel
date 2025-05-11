@@ -118,6 +118,4 @@ type SSEMessagePayload struct {
 
 type SSEClosePayload struct {
 	Error string `json:"error,omitempty"`
-	// Adding a timestamp for debugging
-	Timestamp string `json:"timestamp,omitempty"`
 }
