@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tiny Tunnel Echo Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3 {
+            color: #0066cc;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .card {
+            flex: 1;
+            min-width: 300px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .card h2 {
+            margin-top: 0;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow: auto;
+            max-height: 400px;
+        }
+        button {
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #0052a3;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .status {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+        }
+        .counter {
+            font-weight: bold;
+            color: #0066cc;
+        }
+    </style>
+</head>
+<body>
+    <h1>Tiny Tunnel Echo Server Demo</h1>
+    <p>This page demonstrates the three types of endpoints supported by the echo server.</p>
+
+    <div class="container">
+        <!-- HTTP Section -->
+        <div class="card">
+            <h2>HTTP Endpoint</h2>
+            <p>Send HTTP requests to the server and see the response.</p>
+            
+            <label for="http-method">Method:</label>
+            <select id="http-method">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+            </select>
+            
+            <label for="http-body">Request Body (for POST/PUT):</label>
+            <textarea id="http-body" rows="3" placeholder="Enter request body here"></textarea>
+            
+            <button id="http-send">Send Request</button>
+            
+            <div class="status" id="http-status">Ready to send request.</div>
+            <h3>Response:</h3>
+            <pre id="http-response">// Response will appear here</pre>
+        </div>
+
+        <!-- SSE Section -->
+        <div class="card">
+            <h2>Server-Sent Events</h2>
+            <p>Receive real-time updates from the server using SSE.</p>
+            
+            <button id="sse-connect">Connect to SSE</button>
+            <button id="sse-disconnect" disabled>Disconnect</button>
+            
+            <div class="status" id="sse-status">Disconnected</div>
+            
+            <h3>Request Info:</h3>
+            <pre id="sse-info">// Connection info will appear here</pre>
+            
+            <h3>Updates:</h3>
+            <div>Counter: <span class="counter" id="sse-counter">0</span></div>
+            <pre id="sse-events">// Events will appear here</pre>
+        </div>
+
+        <!-- WebSocket Section -->
+        <div class="card">
+            <h2>WebSocket</h2>
+            <p>Two-way communication with the server using WebSockets.</p>
+            
+            <button id="ws-connect">Connect to WebSocket</button>
+            <button id="ws-disconnect" disabled>Disconnect</button>
+            
+            <div class="status" id="ws-status">Disconnected</div>
+            
+            <label for="ws-message">Message to send:</label>
+            <input type="text" id="ws-message" placeholder="Type a message to echo" disabled>
+            <button id="ws-send" disabled>Send Message</button>
+            
+            <h3>Connection Info:</h3>
+            <pre id="ws-info">// Connection info will appear here</pre>
+            
+            <h3>Counter:</h3>
+            <div>Count: <span class="counter" id="ws-counter">0</span></div>
+            
+            <h3>Messages:</h3>
+            <pre id="ws-messages">// Messages will appear here</pre>
+        </div>
+    </div>
+
+    <script>
+        // Utility function to format JSON
+        function formatJSON(json) {
+            try {
+                return JSON.stringify(JSON.parse(json), null, 2);
+            } catch (e) {
+                return json;
+            }
+        }
+
+        // Utility function to add a message to a pre element
+        function addMessage(elementId, message, prepend = false) {
+            const element = document.getElementById(elementId);
+            const formattedMessage = typeof message === 'object' ? 
+                JSON.stringify(message, null, 2) : message;
+            
+            if (prepend) {
+                element.textContent = formattedMessage + '\n' + element.textContent;
+            } else {
+                if (element.textContent === '// Messages will appear here' || 
+                    element.textContent === '// Events will appear here' ||
+                    element.textContent === '// Response will appear here' ||
+                    element.textContent === '// Connection info will appear here') {
+                    element.textContent = formattedMessage;
+                } else {
+                    element.textContent += '\n' + formattedMessage;
+                }
+            }
+        }
+
+        // HTTP Section
+        document.getElementById('http-send').addEventListener('click', function() {
+            const method = document.getElementById('http-method').value;
+            const body = document.getElementById('http-body').value;
+            const statusElement = document.getElementById('http-status');
+            const responseElement = document.getElementById('http-response');
+            
+            statusElement.textContent = 'Sending request...';
+            responseElement.textContent = '// Waiting for response...';
+            
+            fetch('/http', {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: method === 'GET' ? undefined : body
+            })
+            .then(response => response.text())
+            .then(data => {
+                statusElement.textContent = 'Request completed';
+                responseElement.textContent = formatJSON(data);
+            })
+            .catch(error => {
+                statusElement.textContent = 'Error: ' + error.message;
+                responseElement.textContent = 'Error occurred while making the request.';
+            });
+        });
+
+        // SSE Section
+        let eventSource = null;
+        
+        document.getElementById('sse-connect').addEventListener('click', function() {
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            const statusElement = document.getElementById('sse-status');
+            const infoElement = document.getElementById('sse-info');
+            const eventsElement = document.getElementById('sse-events');
+            const counterElement = document.getElementById('sse-counter');
+            
+            statusElement.textContent = 'Connecting...';
+            infoElement.textContent = '// Waiting for connection info...';
+            eventsElement.textContent = '// Events will appear here';
+            
+            try {
+                eventSource = new EventSource('/sse');
+                
+                eventSource.addEventListener('open', function() {
+                    statusElement.textContent = 'Connected';
+                    document.getElementById('sse-connect').disabled = true;
+                    document.getElementById('sse-disconnect').disabled = false;
+                });
+                
+                eventSource.addEventListener('error', function(event) {
+                    statusElement.textContent = 'Error: Connection failed';
+                    document.getElementById('sse-connect').disabled = false;
+                    document.getElementById('sse-disconnect').disabled = true;
+                    eventSource.close();
+                    eventSource = null;
+                });
+                
+                eventSource.addEventListener('headers', function(event) {
+                    const headers = JSON.parse(event.data);
+                    infoElement.textContent = 'Headers:\n' + JSON.stringify(headers, null, 2);
+                });
+                
+                eventSource.addEventListener('info', function(event) {
+                    const info = JSON.parse(event.data);
+                    infoElement.textContent = 'Request Info:\n' + JSON.stringify(info, null, 2);
+                });
+                
+                eventSource.addEventListener('update', function(event) {
+                    const data = JSON.parse(event.data);
+                    counterElement.textContent = data.count;
+                    addMessage('sse-events', 'Update #' + data.count + ' at ' + data.time, true);
+                });
+                
+            } catch (error) {
+                statusElement.textContent = 'Error: ' + error.message;
+            }
+        });
+        
+        document.getElementById('sse-disconnect').addEventListener('click', function() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+                document.getElementById('sse-status').textContent = 'Disconnected';
+                document.getElementById('sse-connect').disabled = false;
+                document.getElementById('sse-disconnect').disabled = true;
+            }
+        });
+
+        // WebSocket Section
+        let webSocket = null;
+        
+        document.getElementById('ws-connect').addEventListener('click', function() {
+            if (webSocket) {
+                webSocket.close();
+            }
+            
+            const statusElement = document.getElementById('ws-status');
+            const infoElement = document.getElementById('ws-info');
+            const messagesElement = document.getElementById('ws-messages');
+            const counterElement = document.getElementById('ws-counter');
+            
+            statusElement.textContent = 'Connecting...';
+            infoElement.textContent = '// Waiting for connection info...';
+            messagesElement.textContent = '// Messages will appear here';
+            
+            try {
+                // Create WebSocket connection
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws`;
+                webSocket = new WebSocket(wsUrl);
+                
+                webSocket.onopen = function() {
+                    statusElement.textContent = 'Connected';
+                    document.getElementById('ws-connect').disabled = true;
+                    document.getElementById('ws-disconnect').disabled = false;
+                    document.getElementById('ws-message').disabled = false;
+                    document.getElementById('ws-send').disabled = false;
+                };
+                
+                webSocket.onclose = function() {
+                    statusElement.textContent = 'Disconnected';
+                    document.getElementById('ws-connect').disabled = false;
+                    document.getElementById('ws-disconnect').disabled = true;
+                    document.getElementById('ws-message').disabled = true;
+                    document.getElementById('ws-send').disabled = true;
+                    webSocket = null;
+                };
+                
+                webSocket.onerror = function(error) {
+                    statusElement.textContent = 'Error: Connection failed';
+                    addMessage('ws-messages', 'Connection error: ' + error.message);
+                };
+                
+                webSocket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.type === 'connection_info') {
+                            infoElement.textContent = JSON.stringify(data, null, 2);
+                        } else if (data.type === 'counter') {
+                            counterElement.textContent = data.count;
+                        } else if (data.type === 'echo') {
+                            addMessage('ws-messages', 'Echo: ' + data.message + ' (at ' + data.time + ')', true);
+                        } else {
+                            addMessage('ws-messages', event.data, true);
+                        }
+                    } catch (e) {
+                        addMessage('ws-messages', 'Raw message: ' + event.data, true);
+                    }
+                };
+                
+            } catch (error) {
+                statusElement.textContent = 'Error: ' + error.message;
+            }
+        });
+        
+        document.getElementById('ws-disconnect').addEventListener('click', function() {
+            if (webSocket) {
+                webSocket.close();
+            }
+        });
+        
+        document.getElementById('ws-send').addEventListener('click', function() {
+            if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+                const message = document.getElementById('ws-message').value;
+                if (message) {
+                    webSocket.send(message);
+                    document.getElementById('ws-message').value = '';
+                }
+            }
+        });
+
+        // Allow Enter key to send WebSocket messages
+        document.getElementById('ws-message').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                document.getElementById('ws-send').click();
+            }
+        });
+    </script>
+</body>
+</html>
