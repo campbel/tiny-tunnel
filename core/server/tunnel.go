@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/internal/log"
@@ -32,9 +35,11 @@ func NewTunnel(conn *websocket.Conn, options TunnelOptions) *Tunnel {
 	}
 
 	if options.HelloMessage != "" {
-		server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
+		if err := server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
 			Text: options.HelloMessage,
-		})
+		}); err != nil {
+			log.Error("failed to send hello message", "error", err.Error())
+		}
 	}
 
 	ticker := time.NewTicker(15 * time.Second)
@@ -43,9 +48,11 @@ func NewTunnel(conn *websocket.Conn, options TunnelOptions) *Tunnel {
 			if server.tunnel.IsClosed() {
 				return
 			}
-			server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
+			if err := server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
 				Text: "ping",
-			})
+			}); err != nil {
+				log.Error("failed to send ping message", "error", err.Error())
+			}
 		}
 	}()
 
@@ -92,12 +99,153 @@ func (s *Tunnel) Close() {
 	s.tunnel.Close()
 }
 
+// HandleSSERequest handles Server-Sent Events connections
+// It establishes a streaming connection from client to server
+func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Flush headers immediately
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	} else {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Create buffered response channel for better ordering
+	responseChannel := make(chan protocol.Message, 100) // Buffer size to reduce chances of out-of-order delivery
+
+	// Notify client about the SSE request
+	clean, err := s.tunnel.SendWithResponseChannel(protocol.MessageKindSSERequest, &protocol.SSERequestPayload{
+		Path:    r.URL.Path + "?" + r.URL.Query().Encode(),
+		Headers: r.Header,
+	}, responseChannel)
+	if err != nil {
+		log.Error("failed to send SSE request", "error", err.Error())
+		return
+	}
+	defer clean()
+
+	// Create a buffer to hold out-of-order messages until they can be delivered in order
+	messageBuffer := make(map[int]protocol.SSEMessagePayload)
+	expectedSequence := 0
+
+	// Create a serialization point with a mutex to ensure ordered writes
+	var writeMutex sync.Mutex
+
+	// Function to handle writing SSE messages in a synchronized manner
+	writeSSEMessage := func(data string) {
+		writeMutex.Lock()
+		defer writeMutex.Unlock()
+
+		log.Debug("writing SSE message", "data", data)
+		fmt.Fprintf(w, data+"\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}
+
+	// Function to process buffered messages in order
+	processBufferedMessages := func() {
+		writeMutex.Lock()
+		defer writeMutex.Unlock()
+
+		// Keep processing messages as long as we have the next expected sequence
+		for {
+			msg, ok := messageBuffer[expectedSequence]
+			if !ok {
+				break // Don't have the next message yet
+			}
+
+			// Write the message and remove it from the buffer
+			log.Debug("writing buffered SSE message", "sequence", expectedSequence, "data", msg.Data)
+			fmt.Fprintf(w, msg.Data+"\n\n")
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+
+			delete(messageBuffer, expectedSequence)
+			expectedSequence++
+		}
+	}
+
+	for response := range responseChannel {
+		if response.Kind == protocol.MessageKindSSEClose {
+			return
+		}
+		if response.Kind != protocol.MessageKindSSEMessage {
+			log.Error("received unexpected message kind", "kind", response.Kind)
+			return
+		}
+
+		var sseMessage protocol.SSEMessagePayload
+		if err := json.Unmarshal(response.Payload, &sseMessage); err != nil {
+			log.Error("failed to unmarshal SSE message", "error", err.Error())
+			return
+		}
+
+		// Handle backward compatibility for older clients that don't use sequence numbers
+		// Default sequential handling for legacy clients
+		legacyClient := false
+
+		// Check if this might be a message from an older client version
+		if sseMessage.Sequence == 0 {
+			// Look at other messages in the buffer to see if we have sequence numbers
+			if len(messageBuffer) == 0 && expectedSequence == 0 {
+				// This is likely the first message and it has no sequence
+				// Assume this is an older client that doesn't support sequencing
+				legacyClient = true
+				log.Debug("detected legacy client without sequence numbers")
+			}
+		}
+
+		if legacyClient {
+			// For legacy clients, we just write messages in the order they arrive
+			writeSSEMessage(sseMessage.Data)
+		} else {
+			// Standard sequence-based processing for newer clients
+			if sseMessage.Sequence == expectedSequence {
+				// This is the message we're expecting next, write it immediately
+				writeSSEMessage(sseMessage.Data)
+				expectedSequence++
+
+				// Check if we have subsequent messages buffered
+				processBufferedMessages()
+			} else if sseMessage.Sequence > expectedSequence {
+				// This message arrived early, buffer it for later
+				log.Debug("buffering out-of-order SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
+				messageBuffer[sseMessage.Sequence] = sseMessage
+			} else {
+				// This message is a duplicate or arrived very late (we already processed past this sequence)
+				log.Warn("received outdated SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
+			}
+		}
+	}
+	log.Debug("SSE connection closed")
+}
+
 func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
+	// Handle WebSocket requests
 	if r.Header.Get("Upgrade") == "websocket" {
 		s.HandleWebsocketRequest(w, r)
 		return
 	}
 
+	// Detect SSE requests by Accept header or conventional path suffixes
+	acceptHeader := r.Header.Get("Accept")
+	if acceptHeader == "text/event-stream" ||
+		strings.HasSuffix(r.URL.Path, "/events") ||
+		strings.HasSuffix(r.URL.Path, "/sse") {
+		log.Debug("detected SSE request", "path", r.URL.Path, "accept", acceptHeader)
+		s.HandleSSERequest(w, r)
+		return
+	}
+
+	// Process regular HTTP requests
 	responseChannel := make(chan protocol.Message)
 
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -107,12 +255,17 @@ func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	s.tunnel.Send(protocol.MessageKindHttpRequest, &protocol.HttpRequestPayload{
+	clean, err := s.tunnel.SendWithResponseChannel(protocol.MessageKindHttpRequest, &protocol.HttpRequestPayload{
 		Method:  r.Method,
 		Path:    r.URL.Path + "?" + r.URL.Query().Encode(),
 		Headers: r.Header,
 		Body:    bodyBytes,
 	}, responseChannel)
+	if err != nil {
+		log.Error("failed to send HTTP request", "error", err.Error())
+		return
+	}
+	defer clean()
 
 	response := <-responseChannel
 
@@ -155,10 +308,15 @@ func (s *Tunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) 
 	conn := safe.NewWSConn(rawConn)
 
 	responseChannel := make(chan protocol.Message)
-	s.tunnel.Send(protocol.MessageKindWebsocketCreateRequest, &protocol.WebsocketCreateRequestPayload{
+	clean, err := s.tunnel.SendWithResponseChannel(protocol.MessageKindWebsocketCreateRequest, &protocol.WebsocketCreateRequestPayload{
 		Origin: r.Header.Get("Origin"),
 		Path:   r.URL.Path,
 	}, responseChannel)
+	if err != nil {
+		log.Error("failed to send websocket create request", "error", err.Error())
+		return
+	}
+	defer clean()
 
 	response := <-responseChannel
 

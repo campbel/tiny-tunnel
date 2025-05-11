@@ -112,8 +112,10 @@ type SSERequestPayload struct {
 }
 
 type SSEMessagePayload struct {
-	Data string `json:"data,omitempty"`
+	Data     string `json:"data,omitempty"`
+	Sequence int    `json:"sequence,omitempty"` // Sequence number to ensure correct ordering
 }
 
 type SSEClosePayload struct {
+	Error string `json:"error,omitempty"`
 }

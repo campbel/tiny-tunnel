@@ -70,7 +70,7 @@ func TestHttpPayloads(t *testing.T) {
 				Headers: http.Header{
 					"Content-Type":  []string{"application/json"},
 					"Authorization": []string{"Bearer token"},
-					"X-Request-ID": []string{"123"},
+					"X-Request-ID":  []string{"123"},
 				},
 				Body: []byte(`{"status":"updated"}`),
 			},
@@ -85,11 +85,70 @@ func TestHttpPayloads(t *testing.T) {
 			var decoded HttpRequestPayload
 			err = json.Unmarshal(data, &decoded)
 			assert.NoError(t, err)
-			
+
 			assert.Equal(t, tt.payload.Method, decoded.Method)
 			assert.Equal(t, tt.payload.Path, decoded.Path)
 			assert.Equal(t, tt.payload.Headers, decoded.Headers)
 			assert.Equal(t, tt.payload.Body, decoded.Body)
+		})
+	}
+}
+
+func TestSSEPayloads(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload interface{}
+	}{
+		{
+			name: "sse request",
+			payload: SSERequestPayload{
+				Path:    "/events",
+				Headers: http.Header{"Accept": []string{"text/event-stream"}},
+			},
+		},
+		{
+			name: "sse message without sequence",
+			payload: SSEMessagePayload{
+				Data: "event: update\ndata: {\"count\":1}",
+			},
+		},
+		{
+			name: "sse message with sequence",
+			payload: SSEMessagePayload{
+				Data:     "event: update\ndata: {\"count\":2}",
+				Sequence: 5,
+			},
+		},
+		{
+			name: "sse close",
+			payload: SSEClosePayload{
+				Error: "connection closed",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.payload)
+			assert.NoError(t, err)
+
+			switch p := tt.payload.(type) {
+			case SSERequestPayload:
+				var decoded SSERequestPayload
+				err = json.Unmarshal(data, &decoded)
+				assert.NoError(t, err)
+				assert.Equal(t, p, decoded)
+			case SSEMessagePayload:
+				var decoded SSEMessagePayload
+				err = json.Unmarshal(data, &decoded)
+				assert.NoError(t, err)
+				assert.Equal(t, p, decoded)
+			case SSEClosePayload:
+				var decoded SSEClosePayload
+				err = json.Unmarshal(data, &decoded)
+				assert.NoError(t, err)
+				assert.Equal(t, p, decoded)
+			}
 		})
 	}
 }
@@ -111,7 +170,7 @@ func TestWebsocketPayloads(t *testing.T) {
 			payload: WebsocketMessagePayload{
 				SessionID: "session123",
 				Kind:      1, // binary
-				Data:     []byte("hello websocket"),
+				Data:      []byte("hello websocket"),
 			},
 		},
 		{

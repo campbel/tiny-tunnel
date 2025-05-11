@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tiny Tunnel Echo Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3 {
+            color: #0066cc;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .card {
+            flex: 1;
+            min-width: 300px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .card h2 {
+            margin-top: 0;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow: auto;
+            max-height: 400px;
+        }
+        button {
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #0052a3;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .status {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+        }
+        .counter {
+            font-weight: bold;
+            color: #0066cc;
+            font-size: 1.2em;
+        }
+
+        .progress-container {
+            margin: 15px 0;
+            background-color: #f5f5f5;
+            border-radius: 10px;
+            height: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background-color: #0066cc;
+            transition: all 0.5s ease;
+            width: 0%;
+        }
+
+        .event-bubble {
+            display: inline-block;
+            margin: 2px 0;
+            padding: 5px 10px;
+            border-radius: 15px;
+            background-color: #f0f8ff;
+            border-left: 4px solid #0066cc;
+        }
+    </style>
+</head>
+<body>
+    <h1>Tiny Tunnel Echo Server Demo</h1>
+    <p>This page demonstrates the three types of endpoints supported by the echo server.</p>
+
+    <div class="container">
+        <!-- HTTP Section -->
+        <div class="card">
+            <h2>HTTP Endpoint</h2>
+            <p>Send HTTP requests to the server and see the response.</p>
+            
+            <label for="http-method">Method:</label>
+            <select id="http-method">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+            </select>
+            
+            <label for="http-body">Request Body (for POST/PUT):</label>
+            <textarea id="http-body" rows="3" placeholder="Enter request body here"></textarea>
+            
+            <button id="http-send">Send Request</button>
+            
+            <div class="status" id="http-status">Ready to send request.</div>
+            <h3>Response:</h3>
+            <pre id="http-response">// Response will appear here</pre>
+        </div>
+
+        <!-- SSE Section -->
+        <div class="card">
+            <h2>Server-Sent Events</h2>
+            <p>Connect to see the server count from 1 to 5, then automatically close the connection.</p>
+            
+            <button id="sse-connect">Connect to SSE</button>
+            <button id="sse-disconnect" disabled>Disconnect</button>
+            
+            <div class="status" id="sse-status">Disconnected</div>
+            
+            <h3>Request Info:</h3>
+            <pre id="sse-info">// Connection info will appear here</pre>
+            
+            <h3>Count Progress:</h3>
+            <div>Current Count: <span class="counter" id="sse-counter">0</span> / 5</div>
+
+            <div class="progress-container">
+                <div class="progress-bar" id="sse-progress-bar"></div>
+            </div>
+
+            <h3>Events:</h3>
+            <div id="sse-events-container">
+                <pre id="sse-events">// Events will appear here</pre>
+            </div>
+        </div>
+
+        <!-- WebSocket Section -->
+        <div class="card">
+            <h2>WebSocket</h2>
+            <p>Two-way communication with the server using WebSockets.</p>
+            
+            <button id="ws-connect">Connect to WebSocket</button>
+            <button id="ws-disconnect" disabled>Disconnect</button>
+            
+            <div class="status" id="ws-status">Disconnected</div>
+            
+            <label for="ws-message">Message to send:</label>
+            <input type="text" id="ws-message" placeholder="Type a message to echo" disabled>
+            <button id="ws-send" disabled>Send Message</button>
+            
+            <h3>Connection Info:</h3>
+            <pre id="ws-info">// Connection info will appear here</pre>
+            
+            <h3>Counter:</h3>
+            <div>Count: <span class="counter" id="ws-counter">0</span></div>
+            
+            <h3>Messages:</h3>
+            <pre id="ws-messages">// Messages will appear here</pre>
+        </div>
+    </div>
+
+    <script>
+        // Utility function to format JSON
+        function formatJSON(json) {
+            try {
+                return JSON.stringify(JSON.parse(json), null, 2);
+            } catch (e) {
+                return json;
+            }
+        }
+
+        // Utility function to add a message to a pre element
+        function addMessage(elementId, message, prepend = false) {
+            const element = document.getElementById(elementId);
+            const formattedMessage = typeof message === 'object' ?
+                JSON.stringify(message, null, 2) : message;
+
+            // Special handling for SSE events to use styled bubbles
+            if (elementId === 'sse-events') {
+                const container = document.getElementById('sse-events-container');
+                if (container.querySelector('pre').textContent === '// Events will appear here') {
+                    container.innerHTML = '';
+                }
+
+                const bubble = document.createElement('div');
+                bubble.className = 'event-bubble';
+                bubble.textContent = formattedMessage;
+
+                if (prepend) {
+                    container.insertBefore(bubble, container.firstChild);
+                } else {
+                    container.appendChild(bubble);
+                }
+                return;
+            }
+
+            // Standard handling for other pre elements
+            if (prepend) {
+                element.textContent = formattedMessage + '\n' + element.textContent;
+            } else {
+                if (element.textContent === '// Messages will appear here' ||
+                    element.textContent === '// Events will appear here' ||
+                    element.textContent === '// Response will appear here' ||
+                    element.textContent === '// Connection info will appear here') {
+                    element.textContent = formattedMessage;
+                } else {
+                    element.textContent += '\n' + formattedMessage;
+                }
+            }
+        }
+
+        // Update SSE progress bar
+        function updateSseProgress(count) {
+            const progressBar = document.getElementById('sse-progress-bar');
+            const percentage = (count / 5) * 100;
+            progressBar.style.width = percentage + '%';
+
+            // Change color based on progress
+            if (count === 0) {
+                progressBar.style.backgroundColor = '#0066cc'; // Default blue
+            } else if (count <= 2) {
+                progressBar.style.backgroundColor = '#6699cc'; // Lighter blue
+            } else if (count <= 4) {
+                progressBar.style.backgroundColor = '#33cc66'; // Green
+            } else {
+                progressBar.style.backgroundColor = '#00cc00'; // Bright green
+            }
+        }
+
+        // HTTP Section
+        document.getElementById('http-send').addEventListener('click', function() {
+            const method = document.getElementById('http-method').value;
+            const body = document.getElementById('http-body').value;
+            const statusElement = document.getElementById('http-status');
+            const responseElement = document.getElementById('http-response');
+            
+            statusElement.textContent = 'Sending request...';
+            responseElement.textContent = '// Waiting for response...';
+            
+            fetch('/http', {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: method === 'GET' ? undefined : body
+            })
+            .then(response => response.text())
+            .then(data => {
+                statusElement.textContent = 'Request completed';
+                responseElement.textContent = formatJSON(data);
+            })
+            .catch(error => {
+                statusElement.textContent = 'Error: ' + error.message;
+                responseElement.textContent = 'Error occurred while making the request.';
+            });
+        });
+
+        // SSE Section
+        let eventSource = null;
+        
+        document.getElementById('sse-connect').addEventListener('click', function() {
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            const statusElement = document.getElementById('sse-status');
+            const infoElement = document.getElementById('sse-info');
+            const eventsElement = document.getElementById('sse-events');
+            const counterElement = document.getElementById('sse-counter');
+            
+            statusElement.textContent = 'Connecting...';
+            infoElement.textContent = '// Waiting for connection info...';
+            eventsElement.textContent = '// Events will appear here';
+            counterElement.textContent = '0';
+            updateSseProgress(0); // Reset progress bar
+            
+            try {
+                eventSource = new EventSource('/sse');
+
+                eventSource.addEventListener('open', function() {
+                    statusElement.textContent = 'Connected';
+                    document.getElementById('sse-connect').disabled = true;
+                    document.getElementById('sse-disconnect').disabled = false;
+                });
+
+                eventSource.addEventListener('error', function(event) {
+                    if (eventSource) {
+                        // Connection was closed or had an error
+                        document.getElementById('sse-connect').disabled = false;
+                        document.getElementById('sse-disconnect').disabled = true;
+
+                        // Only update status if we didn't already mark it as completed
+                        if (statusElement.textContent !== 'Completed counting to 5') {
+                            statusElement.textContent = 'Connection closed';
+                        }
+
+                        eventSource.close();
+                        eventSource = null;
+                    }
+                });
+
+                // Listen for connect event
+                eventSource.addEventListener('connect', function(event) {
+                    addMessage('sse-events', '🔌 Connection established', true);
+                    infoElement.textContent = 'Connection established at ' + new Date().toISOString();
+                });
+
+                // Listen for count events (1-5)
+                eventSource.addEventListener('count', function(event) {
+                    const count = event.data;
+                    counterElement.textContent = count;
+                    updateSseProgress(count);
+                    addMessage('sse-events', '🔢 Count: ' + count, true);
+                });
+
+                // Listen for completion event
+                eventSource.addEventListener('complete', function(event) {
+                    addMessage('sse-events', '✅ Count complete! Connection will close', true);
+                    statusElement.textContent = 'Completed counting to 5';
+                    updateSseProgress(5); // Ensure progress bar is at 100%
+
+                    // Add a small delay to show the completion before enabling reconnect
+                    setTimeout(function() {
+                        document.getElementById('sse-connect').disabled = false;
+                        document.getElementById('sse-disconnect').disabled = true;
+
+                        // Add ready message below the count
+                        addMessage('sse-events', '🔄 Ready to reconnect! Click Connect to start again.', true);
+                    }, 1000);
+
+                    // The connection will close automatically after this
+                });
+
+                // Legacy support for headers and info events
+                eventSource.addEventListener('headers', function(event) {
+                    const headers = JSON.parse(event.data);
+                    addMessage('sse-events', '📋 Headers received', true);
+                });
+
+                eventSource.addEventListener('info', function(event) {
+                    const info = JSON.parse(event.data);
+                    addMessage('sse-events', '📝 Request info received', true);
+                });
+
+                // Handle standard messages with no event type
+                eventSource.onmessage = function(event) {
+                    addMessage('sse-events', '📩 Message: ' + event.data, true);
+                };
+                
+            } catch (error) {
+                statusElement.textContent = 'Error: ' + error.message;
+            }
+        });
+        
+        document.getElementById('sse-disconnect').addEventListener('click', function() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+
+                // Update UI when disconnected manually
+                const statusElement = document.getElementById('sse-status');
+                statusElement.textContent = 'Disconnected';
+                document.getElementById('sse-connect').disabled = false;
+                document.getElementById('sse-disconnect').disabled = true;
+
+                // Add message about manual disconnection
+                addMessage('sse-events', '🛑 Connection manually closed by user', true);
+                addMessage('sse-events', '🔄 Click Connect to start again', true);
+            }
+        });
+
+        // WebSocket Section
+        let webSocket = null;
+        
+        document.getElementById('ws-connect').addEventListener('click', function() {
+            if (webSocket) {
+                webSocket.close();
+            }
+            
+            const statusElement = document.getElementById('ws-status');
+            const infoElement = document.getElementById('ws-info');
+            const messagesElement = document.getElementById('ws-messages');
+            const counterElement = document.getElementById('ws-counter');
+            
+            statusElement.textContent = 'Connecting...';
+            infoElement.textContent = '// Waiting for connection info...';
+            messagesElement.textContent = '// Messages will appear here';
+            
+            try {
+                // Create WebSocket connection
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws`;
+                webSocket = new WebSocket(wsUrl);
+                
+                webSocket.onopen = function() {
+                    statusElement.textContent = 'Connected';
+                    document.getElementById('ws-connect').disabled = true;
+                    document.getElementById('ws-disconnect').disabled = false;
+                    document.getElementById('ws-message').disabled = false;
+                    document.getElementById('ws-send').disabled = false;
+                };
+                
+                webSocket.onclose = function() {
+                    statusElement.textContent = 'Disconnected';
+                    document.getElementById('ws-connect').disabled = false;
+                    document.getElementById('ws-disconnect').disabled = true;
+                    document.getElementById('ws-message').disabled = true;
+                    document.getElementById('ws-send').disabled = true;
+                    webSocket = null;
+                };
+                
+                webSocket.onerror = function(error) {
+                    statusElement.textContent = 'Error: Connection failed';
+                    addMessage('ws-messages', 'Connection error: ' + error.message);
+                };
+                
+                webSocket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.type === 'connection_info') {
+                            infoElement.textContent = JSON.stringify(data, null, 2);
+                        } else if (data.type === 'counter') {
+                            counterElement.textContent = data.count;
+                        } else if (data.type === 'echo') {
+                            addMessage('ws-messages', 'Echo: ' + data.message + ' (at ' + data.time + ')', true);
+                        } else {
+                            addMessage('ws-messages', event.data, true);
+                        }
+                    } catch (e) {
+                        addMessage('ws-messages', 'Raw message: ' + event.data, true);
+                    }
+                };
+                
+            } catch (error) {
+                statusElement.textContent = 'Error: ' + error.message;
+            }
+        });
+        
+        document.getElementById('ws-disconnect').addEventListener('click', function() {
+            if (webSocket) {
+                webSocket.close();
+            }
+        });
+        
+        document.getElementById('ws-send').addEventListener('click', function() {
+            if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+                const message = document.getElementById('ws-message').value;
+                if (message) {
+                    webSocket.send(message);
+                    document.getElementById('ws-message').value = '';
+                }
+            }
+        });
+
+        // Allow Enter key to send WebSocket messages
+        document.getElementById('ws-message').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                document.getElementById('ws-send').click();
+            }
+        });
+    </script>
+</body>
+</html>

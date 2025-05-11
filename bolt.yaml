@@ -19,12 +19,14 @@ cmds:
     env:
       TINY_TUNNEL_JWT_SECRET: super-secret-key
     steps:
-      - air serve --enable-auth --access-scheme http --access-port 8080
+      - go: DEBUG=true air serve --enable-auth --access-scheme http --access-port 8080
+      - go: air echo
+      # - go: air start --target http://localhost:8000 --name example --server-host localhost --server-port 8080 --insecure --tui=false
 
   start:
     desc: "Start the development server"
     steps:
-      - air start --insecure=true --name example --target http://localhost:3000 --server-host localhost --server-port 8080
+      - air start --insecure=true --name example --target http://localhost:8000 --server-host localhost --server-port 8080
 
   login:
     desc: "Login to the development server"
