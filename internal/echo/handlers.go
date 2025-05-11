@@ -38,59 +38,51 @@ func HandleHTTP(w http.ResponseWriter, r *http.Request) {
 
 // HandleSSE handles Server-Sent Events requests
 func HandleSSE(w http.ResponseWriter, r *http.Request) {
-	log.Info("handling SSE request", "method", r.Method, "path", r.URL.Path)
+	log.Info("handling SSE request", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr, "user_agent", r.UserAgent())
 
 	// Set headers for SSE
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+	log.Debug("SSE headers set", "content_type", w.Header().Get("Content-Type"))
 
 	// Flush headers
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
+		log.Debug("SSE headers flushed")
 	} else {
+		log.Error("streaming not supported by ResponseWriter")
 		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
 		return
 	}
 
 	// Create a channel to detect client disconnect
 	notify := r.Context().Done()
-
-	// Echo headers as first SSE event
-	headersJSON, _ := json.Marshal(r.Header)
-	fmt.Fprintf(w, "event: headers\ndata: %s\n\n", headersJSON)
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
-
-	// Echo request info
-	info := map[string]any{
-		"method": r.Method,
-		"url":    r.URL.String(),
-		"path":   r.URL.Path,
-		"time":   time.Now().Format(time.RFC3339),
-	}
-	infoJSON, _ := json.Marshal(info)
-	fmt.Fprintf(w, "event: info\ndata: %s\n\n", infoJSON)
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
+	log.Debug("SSE disconnect detection setup")
 
 	// Send counter as SSE events
 	counter := 1
 	for {
 		select {
 		case <-notify:
-			log.Info("SSE client disconnected")
+			log.Info("SSE client disconnected", "total_messages_sent", counter-1)
 			return
 		default:
-			data := map[string]any{
-				"count": counter,
-				"time":  time.Now().Format(time.RFC3339),
+			// Simplify the SSE format to just send a simple count
+			// This simple format is more likely to work consistently
+			message := fmt.Sprintf("data: %d\n\n", counter)
+			fmt.Fprint(w, message)
+			log.Debug("SSE data sent", "counter", counter, "message", message)
+
+			// For debugging, add a raw number every 5 counts (not valid SSE format)
+			if counter%5 == 0 {
+				// This is intentionally not valid SSE format to test tunnel
+				checkMsg := fmt.Sprintf("CHECKMARK COUNT %d\n\n", counter)
+				fmt.Fprint(w, checkMsg)
+				log.Debug("Sending checkpoint message (invalid format)", "message", checkMsg)
 			}
-			dataJSON, _ := json.Marshal(data)
-			fmt.Fprintf(w, "event: update\ndata: %s\n\n", dataJSON)
+
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}

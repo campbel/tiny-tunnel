@@ -27,11 +27,16 @@ type Tunnel struct {
 
 	// Handlers
 	handlerRegistry map[int]func(tunnel *Tunnel, id string, payload []byte)
-	
+
+	// Raw message handlers (for direct message handling)
+	messageHandlers   map[int]map[string]func(protocol.Message)
+	messageHandlersMu sync.RWMutex
+	nextHandlerID     int64
+
 	// Context for storing arbitrary data
-	context     map[string]interface{}
-	contextMu   sync.RWMutex
-	
+	context   map[string]interface{}
+	contextMu sync.RWMutex
+
 	// Track last time a message was received
 	lastReceiveTime time.Time
 	lastReceiveMu   sync.RWMutex
@@ -43,6 +48,8 @@ func NewTunnel(conn *websocket.Conn) *Tunnel {
 		responseChannels: safe.NewMap[string, []chan protocol.Message](),
 		closeChan:        make(chan struct{}),
 		handlerRegistry:  make(map[int]func(tunnel *Tunnel, id string, payload []byte)),
+		messageHandlers:  make(map[int]map[string]func(protocol.Message)),
+		nextHandlerID:    1,
 		context:          make(map[string]interface{}),
 		lastReceiveTime:  time.Now(),
 	}
@@ -113,6 +120,45 @@ func (t *Tunnel) SendResponse(kind int, id string, message any) error {
 	return t.conn.WriteJSON(msg)
 }
 
+// RegisterMessageHandler registers a handler for a specific message kind
+// and returns a handler ID that can be used to unregister the handler later
+func (t *Tunnel) RegisterMessageHandler(kind int, handler func(protocol.Message)) string {
+	t.messageHandlersMu.Lock()
+	defer t.messageHandlersMu.Unlock()
+
+	// Create handlers map for this kind if it doesn't exist
+	if _, ok := t.messageHandlers[kind]; !ok {
+		t.messageHandlers[kind] = make(map[string]func(protocol.Message))
+	}
+
+	// Generate a unique handler ID
+	handlerID := uuid.New().String()
+
+	// Store the handler
+	t.messageHandlers[kind][handlerID] = handler
+
+	return handlerID
+}
+
+// UnregisterMessageHandler removes a previously registered handler
+func (t *Tunnel) UnregisterMessageHandler(handlerID string) {
+	t.messageHandlersMu.Lock()
+	defer t.messageHandlersMu.Unlock()
+
+	// Look through all message kinds for this handler ID
+	for kind, handlers := range t.messageHandlers {
+		if _, ok := handlers[handlerID]; ok {
+			delete(t.messageHandlers[kind], handlerID)
+
+			// If this was the last handler for this kind, remove the map
+			if len(t.messageHandlers[kind]) == 0 {
+				delete(t.messageHandlers, kind)
+			}
+			return
+		}
+	}
+}
+
 func (t *Tunnel) Listen(ctx context.Context) {
 	go func() {
 		select {
@@ -140,7 +186,7 @@ func (t *Tunnel) Listen(ctx context.Context) {
 				return
 			}
 		}
-		
+
 		// Update last receive time
 		t.lastReceiveMu.Lock()
 		t.lastReceiveTime = time.Now()
@@ -162,11 +208,30 @@ func (t *Tunnel) Listen(ctx context.Context) {
 						}(reChan)
 					}
 					wg.Wait()
-					t.responseChannels.Delete(msg.RE)
+					//t.responseChannels.Delete(msg.RE)
 				}
 				return
 			}
 
+			// Check for raw message handlers first
+			t.messageHandlersMu.RLock()
+			if handlers, ok := t.messageHandlers[msg.Kind]; ok && len(handlers) > 0 {
+				// Make a copy of the handlers to avoid holding the lock while calling them
+				handlersCopy := make([]func(protocol.Message), 0, len(handlers))
+				for _, h := range handlers {
+					handlersCopy = append(handlersCopy, h)
+				}
+				t.messageHandlersMu.RUnlock()
+
+				// Call all handlers for this message kind
+				for _, handler := range handlersCopy {
+					handler(msg)
+				}
+				return
+			}
+			t.messageHandlersMu.RUnlock()
+
+			// Fall back to typed handlers
 			if handler, ok := t.handlerRegistry[msg.Kind]; ok {
 				handler(t, msg.ID, msg.Payload)
 			} else {

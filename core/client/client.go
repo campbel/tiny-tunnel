@@ -293,9 +293,12 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		for scanner.Scan() {
 			text := scanner.Text()
 			if strings.HasPrefix(text, "data:") {
+				log.Info("received SSE message", "data", text)
 				stateProvider.IncrementSseMessageRecv()
+				if err := tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{Data: text}); err != nil {
+					log.Error("failed to send SSE message", "error", err.Error())
+				}
 			}
-			tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{Data: text})
 		}
 
 		tunnel.SendResponse(protocol.MessageKindSSEClose, id, &protocol.SSEClosePayload{})
@@ -306,44 +309,6 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 	tunnel.SetContext("state", tunnelState)
 
 	return tunnel, nil
-}
-
-// formatTunnelAddress creates a formatted tunnel address for the TUI display
-func formatTunnelAddress(options Options) string {
-	// Extract hostname and port
-	host := options.ServerHost
-	port := options.ServerPort
-
-	// Parse hostname if it contains port
-	hostParts := strings.Split(host, ":")
-	if len(hostParts) > 1 {
-		host = hostParts[0]
-		// Use explicit port or the port from hostname
-		if port == "" {
-			port = hostParts[1]
-		}
-	}
-
-	// Get port from config if not specified
-	if port == "" {
-		if serverInfo, err := options.GetServerInfo(); err == nil && serverInfo.Port != "" {
-			port = serverInfo.Port
-		} else {
-			// Default ports
-			if options.Insecure {
-				port = "80"
-			} else {
-				port = "443"
-			}
-		}
-	}
-
-	scheme := "https"
-	if options.Insecure {
-		scheme = "http"
-	}
-
-	return fmt.Sprintf("%s://%s.%s:%s", scheme, options.Name, host, port)
 }
 
 // StartTUI creates and starts a TUI for the given tunnel.

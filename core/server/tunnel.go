@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/internal/log"
@@ -92,12 +94,71 @@ func (s *Tunnel) Close() {
 	s.tunnel.Close()
 }
 
+// HandleSSERequest handles Server-Sent Events connections
+// It establishes a streaming connection from client to server
+func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Flush headers immediately
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	} else {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Create response channel for initial setup
+	responseChannel := make(chan protocol.Message)
+
+	// Notify client about the SSE request
+	s.tunnel.Send(protocol.MessageKindSSERequest, &protocol.SSERequestPayload{
+		Path:    r.URL.Path + "?" + r.URL.Query().Encode(),
+		Headers: r.Header,
+	}, responseChannel)
+
+	for response := range responseChannel {
+		if response.Kind != protocol.MessageKindSSEMessage {
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+
+		var sseMessage protocol.SSEMessagePayload
+		if err := json.Unmarshal(response.Payload, &sseMessage); err != nil {
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+
+		log.Debug("received SSE message", "data", sseMessage.Data)
+		fmt.Fprintf(w, sseMessage.Data+"\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}
+	log.Debug("SSE connection closed")
+}
+
 func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
+	// Handle WebSocket requests
 	if r.Header.Get("Upgrade") == "websocket" {
 		s.HandleWebsocketRequest(w, r)
 		return
 	}
 
+	// Detect SSE requests by Accept header or conventional path suffixes
+	acceptHeader := r.Header.Get("Accept")
+	if acceptHeader == "text/event-stream" ||
+		strings.HasSuffix(r.URL.Path, "/events") ||
+		strings.HasSuffix(r.URL.Path, "/sse") {
+		log.Debug("detected SSE request", "path", r.URL.Path, "accept", acceptHeader)
+		s.HandleSSERequest(w, r)
+		return
+	}
+
+	// Process regular HTTP requests
 	responseChannel := make(chan protocol.Message)
 
 	bodyBytes, err := io.ReadAll(r.Body)
