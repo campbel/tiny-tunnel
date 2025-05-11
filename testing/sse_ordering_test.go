@@ -20,6 +20,9 @@ import (
 
 // TestSSEMessageOrdering creates a test to verify that messages arrive at the client
 // in the correct order, even if they're sent out of order through the tunnel.
+//
+// TestLegacyClientSupport ensures that the server correctly handles messages from older
+// client versions that don't include sequence numbers.
 func TestSSEMessageOrdering(t *testing.T) {
 	// Create a custom SSE server that can send messages in a controlled manner
 	const maxMessages = 10

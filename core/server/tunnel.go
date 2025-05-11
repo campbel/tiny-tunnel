@@ -179,21 +179,41 @@ func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Handle message based on sequence number
-		if sseMessage.Sequence == expectedSequence {
-			// This is the message we're expecting next, write it immediately
-			writeSSEMessage(sseMessage.Data)
-			expectedSequence++
+		// Handle backward compatibility for older clients that don't use sequence numbers
+		// Default sequential handling for legacy clients
+		legacyClient := false
 
-			// Check if we have subsequent messages buffered
-			processBufferedMessages()
-		} else if sseMessage.Sequence > expectedSequence {
-			// This message arrived early, buffer it for later
-			log.Debug("buffering out-of-order SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
-			messageBuffer[sseMessage.Sequence] = sseMessage
+		// Check if this might be a message from an older client version
+		if sseMessage.Sequence == 0 {
+			// Look at other messages in the buffer to see if we have sequence numbers
+			if len(messageBuffer) == 0 && expectedSequence == 0 {
+				// This is likely the first message and it has no sequence
+				// Assume this is an older client that doesn't support sequencing
+				legacyClient = true
+				log.Debug("detected legacy client without sequence numbers")
+			}
+		}
+
+		if legacyClient {
+			// For legacy clients, we just write messages in the order they arrive
+			writeSSEMessage(sseMessage.Data)
 		} else {
-			// This message is a duplicate or arrived very late (we already processed past this sequence)
-			log.Warn("received outdated SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
+			// Standard sequence-based processing for newer clients
+			if sseMessage.Sequence == expectedSequence {
+				// This is the message we're expecting next, write it immediately
+				writeSSEMessage(sseMessage.Data)
+				expectedSequence++
+
+				// Check if we have subsequent messages buffered
+				processBufferedMessages()
+			} else if sseMessage.Sequence > expectedSequence {
+				// This message arrived early, buffer it for later
+				log.Debug("buffering out-of-order SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
+				messageBuffer[sseMessage.Sequence] = sseMessage
+			} else {
+				// This message is a duplicate or arrived very late (we already processed past this sequence)
+				log.Warn("received outdated SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
+			}
 		}
 	}
 	log.Debug("SSE connection closed")
