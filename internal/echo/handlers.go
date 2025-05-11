@@ -61,35 +61,43 @@ func HandleSSE(w http.ResponseWriter, r *http.Request) {
 	notify := r.Context().Done()
 	log.Debug("SSE disconnect detection setup")
 
-	// Send counter as SSE events
-	counter := 1
-	for {
+	// Send initial connection message
+	connectMsg := "event: connect\ndata: SSE Connection established\n\n"
+	fmt.Fprint(w, connectMsg)
+	log.Debug("SSE connectivity message sent", "message", strings.ReplaceAll(connectMsg, "\n", "\\n"))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	// Count to 5 and then close
+	maxCount := 5
+	for counter := 1; counter <= maxCount; counter++ {
 		select {
 		case <-notify:
 			log.Info("SSE client disconnected", "total_messages_sent", counter-1)
 			return
 		default:
-			// Simplify the SSE format to just send a simple count
-			// This simple format is more likely to work consistently
-			message := fmt.Sprintf("data: %d\n\n", counter)
+			// Send count as SSE event
+			message := fmt.Sprintf("event: count\ndata: %d\n\n", counter)
 			fmt.Fprint(w, message)
-			log.Debug("SSE data sent", "counter", counter, "message", message)
-
-			// For debugging, add a raw number every 5 counts (not valid SSE format)
-			if counter%5 == 0 {
-				// This is intentionally not valid SSE format to test tunnel
-				checkMsg := fmt.Sprintf("CHECKMARK COUNT %d\n\n", counter)
-				fmt.Fprint(w, checkMsg)
-				log.Debug("Sending checkpoint message (invalid format)", "message", checkMsg)
-			}
+			log.Debug("SSE count sent", "counter", counter, "message", strings.ReplaceAll(message, "\n", "\\n"))
 
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
-			counter++
 			time.Sleep(1 * time.Second)
 		}
 	}
+
+	// Send final message indicating completion
+	completeMsg := "event: complete\ndata: Count complete\n\n"
+	fmt.Fprint(w, completeMsg)
+	log.Debug("SSE completion message sent", "message", strings.ReplaceAll(completeMsg, "\n", "\\n"))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	log.Info("SSE count complete, connection closing", "total_messages_sent", maxCount+2)
 }
 
 // HandleWebSocket handles WebSocket connections

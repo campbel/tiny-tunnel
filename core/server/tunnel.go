@@ -121,14 +121,17 @@ func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
 	}, responseChannel)
 
 	for response := range responseChannel {
+		if response.Kind == protocol.MessageKindSSEClose {
+			return
+		}
 		if response.Kind != protocol.MessageKindSSEMessage {
-			http.Error(w, "", http.StatusInternalServerError)
+			log.Error("received unexpected message kind", "kind", response.Kind)
 			return
 		}
 
 		var sseMessage protocol.SSEMessagePayload
 		if err := json.Unmarshal(response.Payload, &sseMessage); err != nil {
-			http.Error(w, "", http.StatusInternalServerError)
+			log.Error("failed to unmarshal SSE message", "error", err.Error())
 			return
 		}
 

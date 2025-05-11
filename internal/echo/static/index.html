@@ -70,6 +70,32 @@
         .counter {
             font-weight: bold;
             color: #0066cc;
+            font-size: 1.2em;
+        }
+
+        .progress-container {
+            margin: 15px 0;
+            background-color: #f5f5f5;
+            border-radius: 10px;
+            height: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background-color: #0066cc;
+            transition: all 0.5s ease;
+            width: 0%;
+        }
+
+        .event-bubble {
+            display: inline-block;
+            margin: 2px 0;
+            padding: 5px 10px;
+            border-radius: 15px;
+            background-color: #f0f8ff;
+            border-left: 4px solid #0066cc;
         }
     </style>
 </head>
@@ -104,7 +130,7 @@
         <!-- SSE Section -->
         <div class="card">
             <h2>Server-Sent Events</h2>
-            <p>Receive real-time updates from the server using SSE.</p>
+            <p>Connect to see the server count from 1 to 5, then automatically close the connection.</p>
             
             <button id="sse-connect">Connect to SSE</button>
             <button id="sse-disconnect" disabled>Disconnect</button>
@@ -114,9 +140,17 @@
             <h3>Request Info:</h3>
             <pre id="sse-info">// Connection info will appear here</pre>
             
-            <h3>Updates:</h3>
-            <div>Counter: <span class="counter" id="sse-counter">0</span></div>
-            <pre id="sse-events">// Events will appear here</pre>
+            <h3>Count Progress:</h3>
+            <div>Current Count: <span class="counter" id="sse-counter">0</span> / 5</div>
+
+            <div class="progress-container">
+                <div class="progress-bar" id="sse-progress-bar"></div>
+            </div>
+
+            <h3>Events:</h3>
+            <div id="sse-events-container">
+                <pre id="sse-events">// Events will appear here</pre>
+            </div>
         </div>
 
         <!-- WebSocket Section -->
@@ -157,13 +191,33 @@
         // Utility function to add a message to a pre element
         function addMessage(elementId, message, prepend = false) {
             const element = document.getElementById(elementId);
-            const formattedMessage = typeof message === 'object' ? 
+            const formattedMessage = typeof message === 'object' ?
                 JSON.stringify(message, null, 2) : message;
-            
+
+            // Special handling for SSE events to use styled bubbles
+            if (elementId === 'sse-events') {
+                const container = document.getElementById('sse-events-container');
+                if (container.querySelector('pre').textContent === '// Events will appear here') {
+                    container.innerHTML = '';
+                }
+
+                const bubble = document.createElement('div');
+                bubble.className = 'event-bubble';
+                bubble.textContent = formattedMessage;
+
+                if (prepend) {
+                    container.insertBefore(bubble, container.firstChild);
+                } else {
+                    container.appendChild(bubble);
+                }
+                return;
+            }
+
+            // Standard handling for other pre elements
             if (prepend) {
                 element.textContent = formattedMessage + '\n' + element.textContent;
             } else {
-                if (element.textContent === '// Messages will appear here' || 
+                if (element.textContent === '// Messages will appear here' ||
                     element.textContent === '// Events will appear here' ||
                     element.textContent === '// Response will appear here' ||
                     element.textContent === '// Connection info will appear here') {
@@ -171,6 +225,24 @@
                 } else {
                     element.textContent += '\n' + formattedMessage;
                 }
+            }
+        }
+
+        // Update SSE progress bar
+        function updateSseProgress(count) {
+            const progressBar = document.getElementById('sse-progress-bar');
+            const percentage = (count / 5) * 100;
+            progressBar.style.width = percentage + '%';
+
+            // Change color based on progress
+            if (count === 0) {
+                progressBar.style.backgroundColor = '#0066cc'; // Default blue
+            } else if (count <= 2) {
+                progressBar.style.backgroundColor = '#6699cc'; // Lighter blue
+            } else if (count <= 4) {
+                progressBar.style.backgroundColor = '#33cc66'; // Green
+            } else {
+                progressBar.style.backgroundColor = '#00cc00'; // Bright green
             }
         }
 
@@ -218,39 +290,81 @@
             statusElement.textContent = 'Connecting...';
             infoElement.textContent = '// Waiting for connection info...';
             eventsElement.textContent = '// Events will appear here';
+            counterElement.textContent = '0';
+            updateSseProgress(0); // Reset progress bar
             
             try {
                 eventSource = new EventSource('/sse');
-                
+
                 eventSource.addEventListener('open', function() {
                     statusElement.textContent = 'Connected';
                     document.getElementById('sse-connect').disabled = true;
                     document.getElementById('sse-disconnect').disabled = false;
                 });
-                
+
                 eventSource.addEventListener('error', function(event) {
-                    statusElement.textContent = 'Error: Connection failed';
-                    document.getElementById('sse-connect').disabled = false;
-                    document.getElementById('sse-disconnect').disabled = true;
-                    eventSource.close();
-                    eventSource = null;
+                    if (eventSource) {
+                        // Connection was closed or had an error
+                        document.getElementById('sse-connect').disabled = false;
+                        document.getElementById('sse-disconnect').disabled = true;
+
+                        // Only update status if we didn't already mark it as completed
+                        if (statusElement.textContent !== 'Completed counting to 5') {
+                            statusElement.textContent = 'Connection closed';
+                        }
+
+                        eventSource.close();
+                        eventSource = null;
+                    }
                 });
-                
+
+                // Listen for connect event
+                eventSource.addEventListener('connect', function(event) {
+                    addMessage('sse-events', '🔌 Connection established', true);
+                    infoElement.textContent = 'Connection established at ' + new Date().toISOString();
+                });
+
+                // Listen for count events (1-5)
+                eventSource.addEventListener('count', function(event) {
+                    const count = event.data;
+                    counterElement.textContent = count;
+                    updateSseProgress(count);
+                    addMessage('sse-events', '🔢 Count: ' + count, true);
+                });
+
+                // Listen for completion event
+                eventSource.addEventListener('complete', function(event) {
+                    addMessage('sse-events', '✅ Count complete! Connection will close', true);
+                    statusElement.textContent = 'Completed counting to 5';
+                    updateSseProgress(5); // Ensure progress bar is at 100%
+
+                    // Add a small delay to show the completion before enabling reconnect
+                    setTimeout(function() {
+                        document.getElementById('sse-connect').disabled = false;
+                        document.getElementById('sse-disconnect').disabled = true;
+
+                        // Add ready message below the count
+                        addMessage('sse-events', '🔄 Ready to reconnect! Click Connect to start again.', true);
+                    }, 1000);
+
+                    // The connection will close automatically after this
+                });
+
+                // Legacy support for headers and info events
                 eventSource.addEventListener('headers', function(event) {
                     const headers = JSON.parse(event.data);
-                    infoElement.textContent = 'Headers:\n' + JSON.stringify(headers, null, 2);
+                    addMessage('sse-events', '📋 Headers received', true);
                 });
-                
+
                 eventSource.addEventListener('info', function(event) {
                     const info = JSON.parse(event.data);
-                    infoElement.textContent = 'Request Info:\n' + JSON.stringify(info, null, 2);
+                    addMessage('sse-events', '📝 Request info received', true);
                 });
-                
-                eventSource.addEventListener('update', function(event) {
-                    const data = JSON.parse(event.data);
-                    counterElement.textContent = data.count;
-                    addMessage('sse-events', 'Update #' + data.count + ' at ' + data.time, true);
-                });
+
+                // Handle standard messages with no event type
+                eventSource.onmessage = function(event) {
+                    addMessage('sse-events', '📩 Message: ' + event.data, true);
+                };
                 
             } catch (error) {
                 statusElement.textContent = 'Error: ' + error.message;
@@ -261,9 +375,16 @@
             if (eventSource) {
                 eventSource.close();
                 eventSource = null;
-                document.getElementById('sse-status').textContent = 'Disconnected';
+
+                // Update UI when disconnected manually
+                const statusElement = document.getElementById('sse-status');
+                statusElement.textContent = 'Disconnected';
                 document.getElementById('sse-connect').disabled = false;
                 document.getElementById('sse-disconnect').disabled = true;
+
+                // Add message about manual disconnection
+                addMessage('sse-events', '🛑 Connection manually closed by user', true);
+                addMessage('sse-events', '🔄 Click Connect to start again', true);
             }
         });
 

@@ -290,18 +290,44 @@ func NewTunnel(ctx context.Context, options Options) (*shared.Tunnel, error) {
 		}
 
 		scanner := bufio.NewScanner(resp.Body)
+		var messageBuilder strings.Builder
+
 		for scanner.Scan() {
-			text := scanner.Text()
-			if strings.HasPrefix(text, "data:") {
-				log.Info("received SSE message", "data", text)
-				stateProvider.IncrementSseMessageRecv()
-				if err := tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{Data: text}); err != nil {
-					log.Error("failed to send SSE message", "error", err.Error())
+			line := scanner.Text()
+			// Empty line indicates end of message
+			if line == "" {
+				message := messageBuilder.String()
+				if message != "" {
+					fmt.Println("sending message", message)
+					if err := tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{
+						Data: message,
+					}); err != nil {
+						log.Error("failed to send SSE message", "error", err.Error())
+					}
+					messageBuilder.Reset()
 				}
+				continue
+			}
+
+			// Add line to current message
+			if messageBuilder.Len() > 0 {
+				messageBuilder.WriteString("\n")
+			}
+			messageBuilder.WriteString(line)
+		}
+
+		// Send any remaining message
+		if messageBuilder.Len() > 0 {
+			if err := tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{
+				Data: messageBuilder.String(),
+			}); err != nil {
+				log.Error("failed to send SSE message", "error", err.Error())
 			}
 		}
 
-		tunnel.SendResponse(protocol.MessageKindSSEClose, id, &protocol.SSEClosePayload{})
+		if err := tunnel.SendResponse(protocol.MessageKindSSEClose, id, &protocol.SSEClosePayload{}); err != nil {
+			log.Error("failed to send SSE close", "error", err.Error())
+		}
 		defer resp.Body.Close()
 	})
 
