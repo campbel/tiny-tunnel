@@ -322,6 +322,8 @@ func NewTunnel(ctx context.Context, options Options, stateProvider stats.StatePr
 				Sequence: currentSequence,
 			}); err != nil {
 				l.Error("failed to send SSE message", "error", err.Error())
+			} else {
+				statsProvider.IncrementSseMessageRecv()
 			}
 		}
 
