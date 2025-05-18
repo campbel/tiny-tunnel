@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/campbel/tiny-tunnel/core/protocol"
+	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/campbel/tiny-tunnel/internal/util"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -55,7 +56,7 @@ func createConnectedTunnels(t *testing.T) (*Tunnel, *Tunnel) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		assert.NoError(err)
 		defer conn.Close()
-		serverTunnel := NewTunnel(conn)
+		serverTunnel := NewTunnel(conn, log.NewTestLogger())
 		serverTunnelChan <- serverTunnel
 		serverTunnel.Listen(context.Background())
 	}))
@@ -70,7 +71,7 @@ func createConnectedTunnels(t *testing.T) (*Tunnel, *Tunnel) {
 	if !assert.NoError(err) {
 		t.FailNow()
 	}
-	clientTunnel := NewTunnel(conn)
+	clientTunnel := NewTunnel(conn, log.NewTestLogger())
 	go clientTunnel.Listen(context.Background())
 
 	return clientTunnel, <-serverTunnelChan

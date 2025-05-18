@@ -15,6 +15,7 @@ import (
 	"github.com/campbel/tiny-tunnel/core/protocol"
 	"github.com/campbel/tiny-tunnel/core/shared"
 	"github.com/campbel/tiny-tunnel/core/stats"
+	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/campbel/tiny-tunnel/internal/safe"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -225,7 +226,7 @@ LOOP:
 	// since it's not critical to the functionality
 }
 
-func setupTestScenario(t *testing.T, ctx context.Context, handler func(w http.ResponseWriter, r *http.Request)) (*shared.Tunnel, chan *safe.WSConn, chan protocol.Message, *stats.Tracker) {
+func setupTestScenario(t *testing.T, ctx context.Context, handler func(w http.ResponseWriter, r *http.Request)) (*shared.Tunnel, chan *safe.WSConn, chan protocol.Message, *stats.TestStatsProvider) {
 	t.Helper()
 
 	// Mock tunnel Server
@@ -286,25 +287,19 @@ func setupTestScenario(t *testing.T, ctx context.Context, handler func(w http.Re
 		t.Fatal(err)
 	}
 	// Create a tunnel with options
+	statsProvider := stats.NewTestStatsProvider()
 	client, err := client.NewTunnel(ctx, client.Options{
 		ServerHost: url.Hostname(),
 		ServerPort: url.Port(),
 		Insecure:   true,
 		Target:     appServer.URL,
-	})
+	}, stats.NewTestStateProvider(), statsProvider, log.NewTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
 	go client.Listen(ctx)
 
-	// Extract the tracker from the tunnel state
-	state, ok := client.GetContext("state").(*stats.TunnelState)
-	if !ok {
-		t.Fatal("tunnel state not found")
-	}
-	tracker := state.GetTracker()
-
-	return client, connChan, responseChan, tracker
+	return client, connChan, responseChan, statsProvider
 }
 
 func JSON(v any) []byte {

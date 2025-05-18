@@ -10,9 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/campbel/tiny-tunnel/core/stats"
-	"github.com/campbel/tiny-tunnel/internal/log"
 )
 
 // ServerConfig holds configuration for a specific server
@@ -32,7 +29,6 @@ type ConfigFile struct {
 func getConfigFilePath() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		log.Error("failed to get user home directory", "err", err)
 		return ""
 	}
 	return filepath.Join(homeDir, ".config", "tiny-tunnel", "auth.json")
@@ -366,8 +362,6 @@ type Options struct {
 	Token             string // JWT auth token
 
 	OutputWriter io.Writer
-
-	Tracker stats.Provider
 }
 
 func (c Options) Origin() string {

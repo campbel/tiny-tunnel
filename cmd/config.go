@@ -71,14 +71,15 @@ var setDefaultCmd = &cobra.Command{
 	Long:  `Set the default server to use when no server is specified.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := log.NewBasicLogger(os.Getenv("DEBUG") == "true")
 		server := args[0]
-		
+
 		err := client.SetDefaultServer(server)
 		if err != nil {
 			return fmt.Errorf("failed to set default server: %w", err)
 		}
-		
-		log.Info("default server set successfully", "server", server)
+
+		logger.Info("default server set successfully", "server", server)
 		return nil
 	},
 }

@@ -25,10 +25,11 @@ type Server struct {
 	server  *http.Server
 	mux     *http.ServeMux
 	handler http.Handler
+	logger  log.Logger
 }
 
 // NewServer creates a new echo server with the given options
-func NewServer(options Options) (*Server, error) {
+func NewServer(options Options, logger log.Logger) (*Server, error) {
 	if options.Port == "" {
 		options.Port = "8000" // Default port
 	}
@@ -46,15 +47,16 @@ func NewServer(options Options) (*Server, error) {
 	mux.HandleFunc("/", fileServer.ServeHTTP)
 
 	// HTTP endpoint
-	mux.HandleFunc("/http", HandleHTTP)
+	mux.HandleFunc("/http", HandleHTTP(logger))
 
 	// Server-Sent Events endpoint
-	mux.HandleFunc("/sse", HandleSSE)
+	mux.HandleFunc("/sse", HandleSSE(logger))
 
 	// WebSocket endpoint
-	mux.HandleFunc("/ws", HandleWebSocket)
+	mux.HandleFunc("/ws", HandleWebSocket(logger))
 
 	server := &Server{
+		logger:  logger,
 		options: options,
 		mux:     mux,
 		handler: mux,
@@ -71,11 +73,11 @@ func NewServer(options Options) (*Server, error) {
 func (s *Server) Start() error {
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("error starting server", "err", err)
+			s.logger.Error("error starting server", "err", err)
 		}
 	}()
 
-	log.Info("echo server running", 
+	s.logger.Info("echo server running",
 		"demo", fmt.Sprintf("http://localhost:%s/", s.options.Port),
 		"http", fmt.Sprintf("http://localhost:%s/http", s.options.Port),
 		"sse", fmt.Sprintf("http://localhost:%s/sse", s.options.Port),
@@ -86,16 +88,16 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully shuts down the echo server
 func (s *Server) Shutdown(ctx context.Context) error {
-	log.Info("shutting down echo server")
+	s.logger.Info("shutting down echo server")
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	err := s.server.Shutdown(shutdownCtx)
 	if err != nil {
 		if err == http.ErrServerClosed {
-			log.Info("server closed")
+			s.logger.Info("server closed")
 		} else {
-			log.Error("error shutting down server", "err", err)
+			s.logger.Error("error shutting down server", "err", err)
 			return err
 		}
 	}

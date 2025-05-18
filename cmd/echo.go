@@ -4,7 +4,10 @@ Copyright © 2024 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"os"
+
 	"github.com/campbel/tiny-tunnel/internal/echo"
+	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/spf13/cobra"
 )
 
@@ -18,10 +21,11 @@ var echoCmd = &cobra.Command{
 	Short: "Run an http server that echos the request back to the client.",
 	Long:  `Run an http server that echos requests back to the client. Supports HTTP, SSE, and WebSocket endpoints.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := log.NewBasicLogger(os.Getenv("DEBUG") == "true")
 		// Create and configure the echo server
 		server, err := echo.NewServer(echo.Options{
 			Port: echoPort,
-		})
+		}, logger)
 		if err != nil {
 			return err
 		}
@@ -33,7 +37,7 @@ var echoCmd = &cobra.Command{
 
 		// Wait for context cancellation (Ctrl+C)
 		<-cmd.Context().Done()
-		
+
 		// Shutdown the server gracefully
 		return server.Shutdown(cmd.Context())
 	},

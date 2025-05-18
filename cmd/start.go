@@ -5,9 +5,12 @@ package cmd
 
 import (
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/core/client"
+	"github.com/campbel/tiny-tunnel/core/client/ui"
+	"github.com/campbel/tiny-tunnel/core/stats"
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/spf13/cobra"
 )
@@ -32,6 +35,7 @@ var startCmd = &cobra.Command{
 	Short: "Start a tunnel connection",
 	Long:  `Start a tunnel connection to expose a local service to the internet.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := log.NewBasicLogger(os.Getenv("DEBUG") == "true")
 		// Set up options with provided parameters
 		options := client.Options{
 			Target:            target,
@@ -49,7 +53,7 @@ var startCmd = &cobra.Command{
 		// If server host is not specified, try to use the default from config
 		if serverHost == "" {
 			if serverInfo, err := options.GetServerInfo(); err == nil {
-				log.Info("using default server from config", "server", serverInfo.Hostname)
+				logger.Info("using default server from config", "server", serverInfo.Hostname)
 				options.ServerHost = serverInfo.Hostname
 
 				// Determine if insecure
@@ -67,17 +71,25 @@ var startCmd = &cobra.Command{
 			}
 		}
 
+		// Create the tunnel state and provider
+		stateProvider := stats.NewTunnelState(options.Target, options.Name)
+		statsProvider := stats.NewTunnelStats()
+
 		// If TUI is enabled, start it in a separate goroutine before entering the listen loop
 		if enableTUI {
+
+			tui := ui.NewTUI(stateProvider, statsProvider)
+
 			// Create and establish the tunnel connection
-			tunnel, err := client.NewTunnel(cmd.Context(), options)
+			tunnel, err := client.NewTunnel(cmd.Context(), options, stateProvider, statsProvider, tui)
 			if err != nil {
-				log.Error("error connecting to tunnel", "err", err)
+				logger.Error("error connecting to tunnel", "err", err)
 				return err
 			}
 			go func() {
-				if err := client.StartTUI(cmd.Context(), tunnel); err != nil {
-					log.Error("error starting TUI", "err", err)
+
+				if err := tui.Start(); err != nil {
+					logger.Error("error starting TUI", "err", err)
 				}
 			}()
 
@@ -91,14 +103,14 @@ var startCmd = &cobra.Command{
 				case <-cmd.Context().Done():
 					break LOOP
 				default:
-					log.Info("connecting...", "server", options.ServerHost, "port", options.ServerPort, "insecure", options.Insecure)
-					tunnel, err := client.NewTunnel(cmd.Context(), options)
+					logger.Info("connecting...", "server", options.ServerHost, "port", options.ServerPort, "insecure", options.Insecure)
+					tunnel, err := client.NewTunnel(cmd.Context(), options, stateProvider, statsProvider, logger)
 					if err != nil {
-						log.Error("error connecting to tunnel", "err", err)
+						logger.Error("error connecting to tunnel", "err", err)
 						time.Sleep(3 * time.Second)
 						continue
 					}
-					log.Info("connected", "server", options.ServerHost, "port", options.ServerPort, "insecure", options.Insecure)
+					logger.Info("connected", "server", options.ServerHost, "port", options.ServerPort, "insecure", options.Insecure)
 					tunnel.Listen(cmd.Context())
 				}
 			}
