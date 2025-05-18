@@ -12,6 +12,8 @@ import (
 
 	"github.com/campbel/tiny-tunnel/core/client"
 	"github.com/campbel/tiny-tunnel/core/server"
+	"github.com/campbel/tiny-tunnel/core/stats"
+	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 )
@@ -51,7 +53,7 @@ func TestE2E(t *testing.T) {
 
 	server := httptest.NewServer(server.NewHandler(server.Options{
 		Hostname: "example.com",
-	}))
+	}, log.NewTestLogger()))
 	defer server.Close()
 
 	serverURL, _ := url.Parse(server.URL)
@@ -63,7 +65,7 @@ func TestE2E(t *testing.T) {
 		ServerPort: serverURL.Port(),
 		Insecure:   true,
 		Target:     appServer.URL,
-	})
+	}, stats.NewTestStateProvider(), stats.NewTestStatsProvider(), log.NewTestLogger())
 
 	assert.NoError(err)
 

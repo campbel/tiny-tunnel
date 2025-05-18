@@ -15,7 +15,9 @@ import (
 
 	"github.com/campbel/tiny-tunnel/core/client"
 	"github.com/campbel/tiny-tunnel/core/server"
+	"github.com/campbel/tiny-tunnel/core/stats"
 	"github.com/campbel/tiny-tunnel/internal/echo"
+	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,7 +25,7 @@ import (
 
 func TestHTTPEndpoints(t *testing.T) {
 	// Create an echo server
-	echoServer, err := echo.NewServer(echo.Options{})
+	echoServer, err := echo.NewServer(echo.Options{}, log.NewTestLogger())
 	require.NoError(t, err)
 
 	// Use the handler directly for testing
@@ -181,7 +183,7 @@ func TestEchoServerThroughTunnel(t *testing.T) {
 	defer parentCancel()
 
 	// Create an echo server
-	echoServer, err := echo.NewServer(echo.Options{})
+	echoServer, err := echo.NewServer(echo.Options{}, log.NewTestLogger())
 	require.NoError(t, err)
 
 	// Use the handler directly for testing
@@ -195,7 +197,7 @@ func TestEchoServerThroughTunnel(t *testing.T) {
 	// Create a tunnel server
 	tunnelServer := httptest.NewServer(server.NewHandler(server.Options{
 		Hostname: "example.com",
-	}))
+	}, log.NewTestLogger()))
 	defer func() {
 		tunnelServer.Close()
 		t.Log("Tunnel server closed")
@@ -213,7 +215,7 @@ func TestEchoServerThroughTunnel(t *testing.T) {
 		ServerPort: serverURL.Port(),
 		Insecure:   true,
 		Target:     echoAppServer.URL,
-	})
+	}, stats.NewTestStateProvider(), stats.NewTestStatsProvider(), log.NewTestLogger())
 	require.NoError(t, err)
 
 	// Start listening in a goroutine

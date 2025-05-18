@@ -43,15 +43,6 @@ var (
 			Foreground(lipgloss.Color("#25A065")).
 			Bold(true)
 
-	subtitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#CCCCCC")).
-			Padding(0, 0, 1, 2)
-
-	boxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#555555")).
-			Padding(0, 1)
-
 	// Log level styles
 	logLevelInfo = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#25A065"))
@@ -68,14 +59,15 @@ var (
 
 // TUI is the main terminal UI component using Bubbletea.
 type TUI struct {
-	state           *stats.TunnelState
-	logCapture      *LogCapture
+	state           stats.StateProvider
+	stats           stats.StatsProvider
+	logs            []LogEntry
 	program         *tea.Program
 	viewport        viewport.Model
 	width, height   int
 	ready           bool
 	lastRefreshTime time.Time
-	statusBar       string
+	debug           bool
 }
 
 // tickMsg is a message that is sent on each tick interval.
@@ -85,23 +77,16 @@ type tickMsg time.Time
 type stateUpdateMsg struct{}
 
 // NewTUI creates a new TUI instance for the given tunnel state.
-func NewTUI(state *stats.TunnelState) *TUI {
+func NewTUI(state stats.StateProvider, stats stats.StatsProvider) *TUI {
 	tui := &TUI{
-		state:      state,
-		logCapture: NewLogCapture(state),
+		state: state,
+		stats: stats,
 	}
 	return tui
 }
 
 // Start initializes and starts the TUI.
 func (t *TUI) Start() error {
-	// Start capturing logs
-	t.logCapture.Start()
-	defer t.logCapture.Stop()
-
-	// Subscribe to state updates
-	t.state.Subscribe(t)
-
 	// Initialize the program
 	p := tea.NewProgram(t, tea.WithAltScreen())
 	t.program = p
@@ -210,8 +195,7 @@ func (t *TUI) View() string {
 	}
 
 	// Get metrics
-	statsData := t.state.GetTracker()
-	httpStats := statsData.GetHttpStats()
+	httpStats := t.stats.GetHttpStats()
 
 	// ASCII art title
 	asciiTitle := `
@@ -228,7 +212,6 @@ func (t *TUI) View() string {
 
 	// Include only the essential info
 	statusElements = append(statusElements, statusStyled)
-	statusElements = append(statusElements, highlightStyle.Render(t.state.GetName()))
 
 	// Only include URL if it exists and it's short enough
 	if t.state.GetURL() != "" {
@@ -282,14 +265,19 @@ func (t *TUI) View() string {
 
 // renderLogs creates a formatted string of all logs.
 func (t *TUI) renderLogs() string {
-	logs := t.state.GetLogs()
-	if len(logs) == 0 {
+	if len(t.logs) == 0 {
 		return "No logs available"
 	}
 
+	// Only show the last 1000 logs
+	end := len(t.logs) - 1000
+	if end < 0 {
+		end = 0
+	}
+
 	var sb strings.Builder
-	for i := len(logs) - 1; i >= 0; i-- {
-		entry := logs[i]
+	for i := len(t.logs) - 1; i >= end; i-- {
+		entry := t.logs[i]
 		// Format timestamp
 		timestamp := entry.Timestamp.Format("15:04:05")
 
@@ -309,7 +297,7 @@ func (t *TUI) renderLogs() string {
 		}
 
 		// Format the log line
-		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", timestamp, levelStr, entry.Message))
+		sb.WriteString(fmt.Sprintf("[%s] %s: %s %s\n", timestamp, levelStr, entry.Message, strings.Join(entry.Args, " ")))
 	}
 
 	return sb.String()
@@ -330,4 +318,52 @@ func (t *TUI) openURL(url string) {
 
 	// Start the command but don't wait for it to complete
 	_ = cmd.Start()
+}
+
+// TUI should support logger interface
+const (
+	logDebug = "DEBUG"
+	logInfo  = "INFO"
+	logWarn  = "WARN"
+	logError = "ERROR"
+)
+
+type LogEntry struct {
+	Timestamp time.Time
+	Level     string
+	Message   string
+	Args      []string
+}
+
+func (t *TUI) Log(level string, message string, args ...any) {
+	// we want args to be kvps
+	kvps := []string{}
+	for i := 0; i < len(args); i += 2 {
+		kvps = append(kvps, fmt.Sprintf("%s=%v", args[i], args[i+1]))
+	}
+
+	t.logs = append(t.logs, LogEntry{
+		Timestamp: time.Now(),
+		Level:     level,
+		Message:   message,
+		Args:      kvps,
+	})
+}
+
+func (t *TUI) Debug(message string, args ...any) {
+	if t.debug {
+		t.Log(logDebug, message, args...)
+	}
+}
+
+func (t *TUI) Info(message string, args ...any) {
+	t.Log(logInfo, message, args...)
+}
+
+func (t *TUI) Warn(message string, args ...any) {
+	t.Log(logWarn, message, args...)
+}
+
+func (t *TUI) Error(message string, args ...any) {
+	t.Log(logError, message, args...)
 }

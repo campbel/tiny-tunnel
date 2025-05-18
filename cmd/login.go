@@ -32,6 +32,7 @@ Examples:
   tnl login https://example.com:8443`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := log.NewBasicLogger(os.Getenv("DEBUG") == "true")
 		serverArg := args[0]
 
 		// Parse server into a proper URL
@@ -72,7 +73,7 @@ Examples:
 
 		// Save token to config with original server string to preserve all details
 		if err := client.SaveTokenToConfig(originalServer, token); err != nil {
-			log.Error("failed to save token", "err", err)
+			logger.Error("failed to save token", "err", err)
 			return err
 		}
 

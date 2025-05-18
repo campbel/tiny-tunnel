@@ -14,6 +14,8 @@ import (
 
 	"github.com/campbel/tiny-tunnel/core/client"
 	"github.com/campbel/tiny-tunnel/core/server"
+	"github.com/campbel/tiny-tunnel/core/stats"
+	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -92,7 +94,7 @@ func TestSSEMessageOrdering(t *testing.T) {
 	// Create a tunnel server
 	tunnelServer := httptest.NewServer(server.NewHandler(server.Options{
 		Hostname: "example.com",
-	}))
+	}, log.NewTestLogger()))
 	defer tunnelServer.Close()
 
 	serverURL, _ := url.Parse(tunnelServer.URL)
@@ -107,7 +109,7 @@ func TestSSEMessageOrdering(t *testing.T) {
 		ServerPort: serverURL.Port(),
 		Insecure:   true,
 		Target:     sseServer.URL,
-	})
+	}, stats.NewTestStateProvider(), stats.NewTestStatsProvider(), log.NewTestLogger())
 	require.NoError(t, err)
 
 	go clientTunnel.Listen(ctx)

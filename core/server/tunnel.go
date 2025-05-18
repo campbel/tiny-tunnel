@@ -22,23 +22,25 @@ import (
 type Tunnel struct {
 	tunnel         *shared.Tunnel
 	websocketConns *safe.Map[string, *safe.WSConn]
+	l              log.Logger
 }
 
 type TunnelOptions struct {
 	HelloMessage string
 }
 
-func NewTunnel(conn *websocket.Conn, options TunnelOptions) *Tunnel {
+func NewTunnel(conn *websocket.Conn, options TunnelOptions, l log.Logger) *Tunnel {
 	server := &Tunnel{
-		tunnel:         shared.NewTunnel(conn),
+		tunnel:         shared.NewTunnel(conn, l),
 		websocketConns: safe.NewMap[string, *safe.WSConn](),
+		l:              l,
 	}
 
 	if options.HelloMessage != "" {
 		if err := server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
 			Text: options.HelloMessage,
 		}); err != nil {
-			log.Error("failed to send hello message", "error", err.Error())
+			l.Error("failed to send hello message", "error", err.Error())
 		}
 	}
 
@@ -51,39 +53,39 @@ func NewTunnel(conn *websocket.Conn, options TunnelOptions) *Tunnel {
 			if err := server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
 				Text: "ping",
 			}); err != nil {
-				log.Error("failed to send ping message", "error", err.Error())
+				l.Error("failed to send ping message", "error", err.Error())
 			}
 		}
 	}()
 
 	server.tunnel.RegisterTextHandler(func(tunnel *shared.Tunnel, id string, payload protocol.TextPayload) {
 		if payload.Text == "pong" {
-			log.Debug("received pong", "id", id)
+			l.Debug("received pong", "id", id)
 			return
 		}
-		log.Debug("handling text message", "payload", payload)
+		l.Debug("handling text message", "payload", payload)
 	})
 
 	server.tunnel.RegisterWebsocketMessageHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketMessagePayload) {
-		log.Debug("handling websocket message", "payload", payload)
+		l.Debug("handling websocket message", "payload", payload)
 		conn, ok := server.websocketConns.Get(payload.SessionID)
 		if !ok {
 			return
 		}
 		err := conn.WriteMessage(payload.Kind, payload.Data)
 		if err != nil {
-			log.Error("failed to write websocket message", "error", err.Error())
+			l.Error("failed to write websocket message", "error", err.Error())
 		}
 	})
 
 	server.tunnel.RegisterWebsocketCloseHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketClosePayload) {
-		log.Debug("handling websocket close", "payload", payload)
+		l.Debug("handling websocket close", "payload", payload)
 		conn, ok := server.websocketConns.Get(payload.SessionID)
 		if !ok {
 			return
 		}
 		if err := conn.Close(); err != nil {
-			log.Error("failed to close websocket connection", "error", err.Error(), "payload", payload)
+			l.Error("failed to close websocket connection", "error", err.Error(), "payload", payload)
 		}
 		server.websocketConns.Delete(payload.SessionID)
 	})
@@ -125,7 +127,7 @@ func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
 		Headers: r.Header,
 	}, responseChannel)
 	if err != nil {
-		log.Error("failed to send SSE request", "error", err.Error())
+		s.l.Error("failed to send SSE request", "error", err.Error())
 		return
 	}
 	defer clean()
@@ -142,7 +144,7 @@ func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
 		writeMutex.Lock()
 		defer writeMutex.Unlock()
 
-		log.Debug("writing SSE message", "data", data)
+		s.l.Debug("writing SSE message", "data", data)
 		fmt.Fprintf(w, data+"\n\n")
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
@@ -162,7 +164,7 @@ func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Write the message and remove it from the buffer
-			log.Debug("writing buffered SSE message", "sequence", expectedSequence, "data", msg.Data)
+			s.l.Debug("writing buffered SSE message", "sequence", expectedSequence, "data", msg.Data)
 			fmt.Fprintf(w, msg.Data+"\n\n")
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
@@ -178,13 +180,13 @@ func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if response.Kind != protocol.MessageKindSSEMessage {
-			log.Error("received unexpected message kind", "kind", response.Kind)
+			s.l.Error("received unexpected message kind", "kind", response.Kind)
 			return
 		}
 
 		var sseMessage protocol.SSEMessagePayload
 		if err := json.Unmarshal(response.Payload, &sseMessage); err != nil {
-			log.Error("failed to unmarshal SSE message", "error", err.Error())
+			s.l.Error("failed to unmarshal SSE message", "error", err.Error())
 			return
 		}
 
@@ -199,7 +201,7 @@ func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
 				// This is likely the first message and it has no sequence
 				// Assume this is an older client that doesn't support sequencing
 				legacyClient = true
-				log.Debug("detected legacy client without sequence numbers")
+				s.l.Debug("detected legacy client without sequence numbers")
 			}
 		}
 
@@ -217,15 +219,15 @@ func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
 				processBufferedMessages()
 			} else if sseMessage.Sequence > expectedSequence {
 				// This message arrived early, buffer it for later
-				log.Debug("buffering out-of-order SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
+				s.l.Debug("buffering out-of-order SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
 				messageBuffer[sseMessage.Sequence] = sseMessage
 			} else {
 				// This message is a duplicate or arrived very late (we already processed past this sequence)
-				log.Warn("received outdated SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
+				s.l.Warn("received outdated SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
 			}
 		}
 	}
-	log.Debug("SSE connection closed")
+	s.l.Debug("SSE connection closed")
 }
 
 func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
@@ -240,7 +242,7 @@ func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
 	if acceptHeader == "text/event-stream" ||
 		strings.HasSuffix(r.URL.Path, "/events") ||
 		strings.HasSuffix(r.URL.Path, "/sse") {
-		log.Debug("detected SSE request", "path", r.URL.Path, "accept", acceptHeader)
+		s.l.Debug("detected SSE request", "path", r.URL.Path, "accept", acceptHeader)
 		s.HandleSSERequest(w, r)
 		return
 	}
@@ -262,7 +264,7 @@ func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
 		Body:    bodyBytes,
 	}, responseChannel)
 	if err != nil {
-		log.Error("failed to send HTTP request", "error", err.Error())
+		s.l.Error("failed to send HTTP request", "error", err.Error())
 		return
 	}
 	defer clean()
@@ -280,7 +282,7 @@ func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
-	log.Debug("received response", "duration", time.Since(start), "status", responsePayload.Response.Status)
+	s.l.Debug("received response", "duration", time.Since(start), "status", responsePayload.Response.Status)
 
 	for k, v := range responsePayload.Response.Headers {
 		for _, vv := range v {
@@ -313,7 +315,7 @@ func (s *Tunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) 
 		Path:   r.URL.Path,
 	}, responseChannel)
 	if err != nil {
-		log.Error("failed to send websocket create request", "error", err.Error())
+		s.l.Error("failed to send websocket create request", "error", err.Error())
 		return
 	}
 	defer clean()
@@ -343,11 +345,11 @@ func (s *Tunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) 
 	for {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
-			log.Debug("app websocket connection closed", "sessionID", responsePayload.SessionID, "error", err.Error())
+			s.l.Debug("app websocket connection closed", "sessionID", responsePayload.SessionID, "error", err.Error())
 			if err := s.tunnel.Send(protocol.MessageKindWebsocketClose, &protocol.WebsocketClosePayload{
 				SessionID: responsePayload.SessionID,
 			}); err != nil {
-				log.Error("failed to send websocket close", "error", err.Error())
+				s.l.Error("failed to send websocket close", "error", err.Error())
 			}
 			return
 		}
@@ -359,10 +361,10 @@ func (s *Tunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) 
 		}); err != nil {
 			if err == websocket.ErrCloseSent {
 				conn.Close()
-				log.Debug("tunnel websocket connection closed", "sessionID", responsePayload.SessionID, "error", err.Error())
+				s.l.Debug("tunnel websocket connection closed", "sessionID", responsePayload.SessionID, "error", err.Error())
 				return
 			}
-			log.Error("failed to send websocket message", "error", err.Error())
+			s.l.Error("failed to send websocket message", "error", err.Error())
 			continue
 		}
 	}

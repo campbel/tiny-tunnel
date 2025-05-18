@@ -39,9 +39,11 @@ type Tunnel struct {
 	// Track last time a message was received
 	lastReceiveTime time.Time
 	lastReceiveMu   sync.RWMutex
+
+	l log.Logger
 }
 
-func NewTunnel(conn *websocket.Conn) *Tunnel {
+func NewTunnel(conn *websocket.Conn, l log.Logger) *Tunnel {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Tunnel{
 		conn:             safe.NewWSConn(conn),
@@ -52,6 +54,7 @@ func NewTunnel(conn *websocket.Conn) *Tunnel {
 		lastReceiveTime:  time.Now(),
 		ctx:              ctx,
 		cancelFunc:       cancel,
+		l:                l,
 	}
 }
 
@@ -177,7 +180,7 @@ func (t *Tunnel) Listen(ctx context.Context) {
 			switch v := err.(type) {
 			case *websocket.CloseError:
 				if v.Code != websocket.CloseNormalClosure {
-					log.Error("receive non-normal closure", "code", v.Code, "text", v.Text)
+					t.l.Error("receive non-normal closure", "code", v.Code, "text", v.Text)
 				}
 				t.close(true)
 				return
@@ -215,7 +218,7 @@ func (t *Tunnel) Listen(ctx context.Context) {
 			if handler, ok := t.handlerRegistry[msg.Kind]; ok {
 				handler(t, msg.ID, msg.Payload)
 			} else {
-				log.Error("no handler registered for message kind", "kind", msg.Kind)
+				t.l.Error("no handler registered for message kind", "kind", msg.Kind)
 			}
 		}(msg)
 	}
@@ -260,7 +263,7 @@ func handlerFunc[T any](handler func(tunnel *Tunnel, id string, payload T)) func
 	return func(tunnel *Tunnel, id string, payload []byte) {
 		var tPayload T
 		if err := json.Unmarshal(payload, &tPayload); err != nil {
-			log.Error("failed to unmarshal payload", "error", err.Error())
+			tunnel.l.Error("failed to unmarshal payload", "error", err.Error())
 			return
 		}
 		handler(tunnel, id, tPayload)

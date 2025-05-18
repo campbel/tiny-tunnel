@@ -12,6 +12,8 @@ import (
 
 	"github.com/campbel/tiny-tunnel/core/client"
 	"github.com/campbel/tiny-tunnel/core/server"
+	"github.com/campbel/tiny-tunnel/core/stats"
+	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/campbel/tiny-tunnel/internal/util"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -23,7 +25,7 @@ func TestServerRoot(t *testing.T) {
 
 	server := httptest.NewServer(server.NewHandler(server.Options{
 		Hostname: "example.com",
-	}))
+	}, log.NewTestLogger()))
 	defer server.Close()
 
 	response, err := http.Get(server.URL)
@@ -45,7 +47,7 @@ func TestServerRegister(t *testing.T) {
 
 	server := httptest.NewServer(server.NewHandler(server.Options{
 		Hostname: "example.com",
-	}))
+	}, log.NewTestLogger()))
 	defer server.Close()
 
 	wsURL, err := util.GetWebsocketURL(server.URL)
@@ -72,7 +74,7 @@ func TestServerConnectWithClient(t *testing.T) {
 
 	server := httptest.NewServer(server.NewHandler(server.Options{
 		Hostname: "example.com",
-	}))
+	}, log.NewTestLogger()))
 	defer server.Close()
 
 	serverURL, err := url.Parse(server.URL)
@@ -88,7 +90,7 @@ func TestServerConnectWithClient(t *testing.T) {
 		ServerPort: serverURL.Port(),
 		Insecure:   true,
 		Target:     appServer.URL,
-	})
+	}, stats.NewTestStateProvider(), stats.NewTestStatsProvider(), log.NewTestLogger())
 
 	if !assert.NoError(err) {
 		return
@@ -137,7 +139,7 @@ func TestServerTunnel(t *testing.T) {
 
 		serverTunnel := server.NewTunnel(conn, server.TunnelOptions{
 			HelloMessage: "hello, world!",
-		})
+		}, log.NewTestLogger())
 		serverTunnelChan <- serverTunnel
 		serverTunnel.Listen(serverCtx)
 	}))
@@ -162,7 +164,7 @@ func TestServerTunnel(t *testing.T) {
 		ServerPort: serverURL.Port(),
 		Insecure:   true,
 		Target:     appServer.URL,
-	})
+	}, stats.NewTestStateProvider(), stats.NewTestStatsProvider(), log.NewTestLogger())
 
 	assert.NoError(err)
 

@@ -4,7 +4,12 @@ import (
 	"sync"
 )
 
-type Provider interface {
+type StatsProvider interface {
+	GetStats() map[string]any
+	GetHttpStats() HttpStats
+	GetWebsocketStats() WebsocketStats
+	GetSseStats() ServerSentEventsStats
+	GetWebsocketConnections() int
 	IncrementWebsocketConnection()
 	DecrementWebsocketConnection()
 	IncrementWebsocketMessageSent()
@@ -16,7 +21,11 @@ type Provider interface {
 	IncrementSseMessageRecv()
 }
 
-type Tracker struct {
+func NewTunnelStats() *Stats {
+	return &Stats{}
+}
+
+type Stats struct {
 	sync.Mutex
 	websocket WebsocketStats
 	http      HttpStats
@@ -41,7 +50,7 @@ type ServerSentEventsStats struct {
 	TotalMessagesRecv int
 }
 
-func (t *Tracker) GetStats() map[string]any {
+func (t *Stats) GetStats() map[string]any {
 	return map[string]any{
 		"websocket": t.websocket,
 		"http":      t.http,
@@ -49,74 +58,80 @@ func (t *Tracker) GetStats() map[string]any {
 	}
 }
 
-func (t *Tracker) GetHttpStats() HttpStats {
+func (t *Stats) GetHttpStats() HttpStats {
 	t.Lock()
 	defer t.Unlock()
 	return t.http
 }
-func (t *Tracker) GetWebsocketStats() WebsocketStats {
+func (t *Stats) GetWebsocketStats() WebsocketStats {
 	t.Lock()
 	defer t.Unlock()
 	return t.websocket
 }
 
-func (t *Tracker) GetSseStats() ServerSentEventsStats {
+func (t *Stats) GetSseStats() ServerSentEventsStats {
 	t.Lock()
 	defer t.Unlock()
 	return t.sse
 }
 
-func (t *Tracker) IncrementWebsocketConnection() {
+func (t *Stats) GetWebsocketConnections() int {
+	t.Lock()
+	defer t.Unlock()
+	return t.websocket.ActiveConnections
+}
+
+func (t *Stats) IncrementWebsocketConnection() {
 	t.Lock()
 	defer t.Unlock()
 	t.websocket.TotalConnections++
 	t.websocket.ActiveConnections++
 }
 
-func (t *Tracker) DecrementWebsocketConnection() {
+func (t *Stats) DecrementWebsocketConnection() {
 	t.Lock()
 	defer t.Unlock()
 	t.websocket.ActiveConnections--
 }
 
-func (t *Tracker) IncrementWebsocketMessageSent() {
+func (t *Stats) IncrementWebsocketMessageSent() {
 	t.Lock()
 	defer t.Unlock()
 	t.websocket.TotalMessagesSent++
 }
 
-func (t *Tracker) IncrementWebsocketMessageRecv() {
+func (t *Stats) IncrementWebsocketMessageRecv() {
 	t.Lock()
 	defer t.Unlock()
 	t.websocket.TotalMessagesRecv++
 }
 
-func (t *Tracker) IncrementHttpRequest() {
+func (t *Stats) IncrementHttpRequest() {
 	t.Lock()
 	defer t.Unlock()
 	t.http.TotalRequests++
 }
 
-func (t *Tracker) IncrementHttpResponse() {
+func (t *Stats) IncrementHttpResponse() {
 	t.Lock()
 	defer t.Unlock()
 	t.http.TotalResponses++
 }
 
-func (t *Tracker) IncrementSseConnection() {
+func (t *Stats) IncrementSseConnection() {
 	t.Lock()
 	defer t.Unlock()
 	t.sse.TotalConnections++
 	t.sse.ActiveConnections++
 }
 
-func (t *Tracker) DecrementSseConnection() {
+func (t *Stats) DecrementSseConnection() {
 	t.Lock()
 	defer t.Unlock()
 	t.sse.ActiveConnections--
 }
 
-func (t *Tracker) IncrementSseMessageRecv() {
+func (t *Stats) IncrementSseMessageRecv() {
 	t.Lock()
 	defer t.Unlock()
 	t.sse.TotalMessagesRecv++

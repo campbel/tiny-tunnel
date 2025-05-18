@@ -32,9 +32,10 @@ type Handler struct {
 	options  Options
 	upgrader websocket.Upgrader
 	tunnels  *safe.Map[string, *Tunnel]
+	l        log.Logger
 }
 
-func NewHandler(options Options) http.Handler {
+func NewHandler(options Options, logger log.Logger) http.Handler {
 	server := &Handler{
 		options: options,
 		upgrader: websocket.Upgrader{
@@ -43,6 +44,7 @@ func NewHandler(options Options) http.Handler {
 			},
 		},
 		tunnels: safe.NewMap[string, *Tunnel](),
+		l:       logger,
 	}
 
 	router := mux.NewRouter()
@@ -81,7 +83,7 @@ func (s *Handler) HandleRoot(w http.ResponseWriter, r *http.Request) {
 	// Serve our UI index.html
 	indexData, err := ui.StaticFiles.ReadFile("static/index.html")
 	if err != nil {
-		log.Error("error reading index.html", "err", err)
+		s.l.Error("error reading index.html", "err", err)
 		http.Error(w, "Error loading UI", http.StatusInternalServerError)
 		return
 	}
@@ -107,7 +109,7 @@ func (s *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	// Serve our login.html
 	loginData, err := ui.StaticFiles.ReadFile("static/login.html")
 	if err != nil {
-		log.Error("error reading login.html", "err", err)
+		s.l.Error("error reading login.html", "err", err)
 		http.Error(w, "Error loading login page", http.StatusInternalServerError)
 		return
 	}
@@ -146,29 +148,29 @@ func (s *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Log the registration with user info
-		log.Info("tunnel registration attempt", "name", name, "email", claims.Email)
+		s.l.Info("tunnel registration attempt", "name", name, "email", claims.Email)
 	}
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Error("websocket upgrade failed", "err", err)
+		s.l.Error("websocket upgrade failed", "err", err)
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
 
 	tunnel := NewTunnel(conn, TunnelOptions{
 		HelloMessage: fmt.Sprintf("Welcome to Tiny Tunnel! Your tunnel is ready at %s", s.options.GetTunnelURL(name)),
-	})
+	}, s.l)
 	if !s.tunnels.SetNX(name, tunnel) {
 		http.Error(w, "name is already used", http.StatusBadRequest)
 		return
 	}
-	log.Info("registered tunnel", "name", name)
+	s.l.Info("registered tunnel", "name", name)
 
 	tunnel.Listen(r.Context())
 
 	s.tunnels.Delete(name)
-	log.Info("unregistered tunnel", "name", name)
+	s.l.Info("unregistered tunnel", "name", name)
 }
 
 // getHeaderCaseInsensitive retrieves a header value using case-insensitive matching
@@ -211,7 +213,7 @@ func (s *Handler) authTokenMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		})
 
 		if err != nil {
-			log.Error("token validation failed", "err", err)
+			s.l.Error("token validation failed", "err", err)
 			http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
 			return
 		}
@@ -254,7 +256,7 @@ func (s *Handler) HandleGenerateToken(w http.ResponseWriter, r *http.Request) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString([]byte(s.options.GetJWTSecret()))
 	if err != nil {
-		log.Error("error signing token", "err", err)
+		s.l.Error("error signing token", "err", err)
 		http.Error(w, "Error generating token", http.StatusInternalServerError)
 		return
 	}

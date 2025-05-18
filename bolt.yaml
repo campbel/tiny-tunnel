@@ -14,6 +14,10 @@ up:
   - go install github.com/air-verse/air@latest
 
 cmds:
+  tnl:
+    steps:
+      - go run main.go {{ .args }}
+
   dev:
     desc: "Start the development server"
     env:
@@ -37,29 +41,3 @@ cmds:
     desc: "Run the tests"
     steps:
       - go test -v ./...
-
-  example:
-    desc: "Run the example"
-    aliases: [x]
-    cmds:
-      http:
-        desc: "Run the rest api"
-        env:
-          PORT: "8211"
-        steps:
-          - go: { sh: "go run examples/rest-api/main.go" }
-          - air start --insecure=true --name http --target http://localhost:${PORT} --server-host localhost --server-port 8080
-      sse:
-        desc: "Run the sse counter"
-        env:
-          PORT: "8212"
-        steps:
-          - go: { sh: "go run examples/sse-counter/main.go" }
-          - air start --insecure=true --name sse --target http://localhost:${PORT} --server-host localhost --server-port 8080
-      ws:
-        desc: "Run the websocket counter"
-        env:
-          PORT: "8213"
-        steps:
-          - go: { sh: "go run examples/websocket-counter/main.go" }
-          - air start --insecure=true --name ws --target http://localhost:${PORT} --server-host localhost --server-port 8080

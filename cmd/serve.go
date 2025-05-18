@@ -6,6 +6,7 @@ package cmd
 import (
 	"context"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/core/server"
@@ -27,7 +28,8 @@ var serveCmd = &cobra.Command{
 	Short: "",
 	Long:  ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log.Info("starting server", "port", port, "hostname", hostname)
+		logger := log.NewBasicLogger(os.Getenv("DEBUG") == "true")
+		logger.Info("starting server", "port", port, "hostname", hostname)
 
 		ctx := cmd.Context()
 
@@ -36,7 +38,7 @@ var serveCmd = &cobra.Command{
 			EnableAuth:   enableAuth,
 			AccessScheme: accessScheme,
 			AccessPort:   accessPort,
-		})
+		}, logger)
 
 		server := &http.Server{
 			Addr:    ":" + port,
@@ -45,19 +47,19 @@ var serveCmd = &cobra.Command{
 
 		go func() {
 			if err := server.ListenAndServe(); err != nil {
-				log.Error("error starting server", "err", err)
+				logger.Error("error starting server", "err", err)
 			}
 		}()
 
 		<-ctx.Done()
-		log.Info("shutting down server")
+		logger.Info("shutting down server")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			if err == http.ErrServerClosed {
-				log.Info("server closed")
+				logger.Info("server closed")
 			} else {
-				log.Error("error shutting down server", "err", err)
+				logger.Error("error shutting down server", "err", err)
 			}
 		}
 
