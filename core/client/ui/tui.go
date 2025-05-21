@@ -196,6 +196,8 @@ func (t *TUI) View() string {
 
 	// Get metrics
 	httpStats := t.stats.GetHttpStats()
+	wsStats := t.stats.GetWebsocketStats()
+	sseStats := t.stats.GetSseStats()
 
 	// ASCII art title
 	asciiTitle := `
@@ -247,7 +249,7 @@ func (t *TUI) View() string {
 		Padding(0, 2).
 		Align(lipgloss.Center).
 		Width(t.width).
-		Render(fmt.Sprintf("✓ %d Requests Processed", httpStats.TotalRequests))
+		Render(fmt.Sprintf("✓ %d Requests Processed | %d Active Websockets | %d Active SSE", httpStats.TotalRequests, wsStats.ActiveConnections, sseStats.ActiveConnections))
 
 	// Show logs
 	logContent := t.viewport.View()
