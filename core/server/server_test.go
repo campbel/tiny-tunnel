@@ -137,9 +137,10 @@ func TestServerTunnel(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		serverTunnel := server.NewTunnel(conn, server.TunnelOptions{
-			HelloMessage: "hello, world!",
-		}, log.NewTestLogger())
+		serverTunnel := server.NewTunnel(conn, server.TunnelOptions{}, log.NewTestLogger())
+		if err := serverTunnel.SendText("hello, world!"); err != nil {
+			t.Error(err)
+		}
 		serverTunnelChan <- serverTunnel
 		serverTunnel.Listen(serverCtx)
 	}))

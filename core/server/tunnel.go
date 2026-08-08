@@ -23,23 +23,13 @@ type Tunnel struct {
 	l              log.Logger
 }
 
-type TunnelOptions struct {
-	HelloMessage string
-}
+type TunnelOptions struct{}
 
 func NewTunnel(conn *websocket.Conn, options TunnelOptions, l log.Logger) *Tunnel {
 	server := &Tunnel{
 		tunnel:         shared.NewTunnel(conn, l),
 		websocketConns: safe.NewMap[string, *safe.WSConn](),
 		l:              l,
-	}
-
-	if options.HelloMessage != "" {
-		if err := server.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{
-			Text: options.HelloMessage,
-		}); err != nil {
-			l.Error("failed to send hello message", "error", err.Error())
-		}
 	}
 
 	ticker := time.NewTicker(15 * time.Second)
@@ -89,6 +79,13 @@ func NewTunnel(conn *websocket.Conn, options TunnelOptions, l log.Logger) *Tunne
 	})
 
 	return server
+}
+
+// SendText sends a text message (e.g. the welcome/ready announcement) to
+// the tunnel client. Callers should only announce readiness after the
+// tunnel is actually registered and routable.
+func (s *Tunnel) SendText(text string) error {
+	return s.tunnel.Send(protocol.MessageKindText, &protocol.TextPayload{Text: text})
 }
 
 func (s *Tunnel) Listen(ctx context.Context) {

@@ -166,14 +166,19 @@ func (s *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tunnel := NewTunnel(conn, TunnelOptions{
-		HelloMessage: fmt.Sprintf("Welcome to Tiny Tunnel! Your tunnel is ready at %s", s.options.GetTunnelURL(name)),
-	}, s.l)
+	tunnel := NewTunnel(conn, TunnelOptions{}, s.l)
 	if !s.tunnels.SetNX(name, tunnel) {
 		http.Error(w, "name is already used", http.StatusBadRequest)
 		return
 	}
 	s.l.Info("registered tunnel", "name", name)
+
+	// Announce readiness only after the tunnel is registered and routable —
+	// clients (and tests) treat the welcome message as "requests will now be
+	// served".
+	if err := tunnel.SendText(fmt.Sprintf("Welcome to Tiny Tunnel! Your tunnel is ready at %s", s.options.GetTunnelURL(name))); err != nil {
+		s.l.Error("failed to send hello message", "error", err.Error())
+	}
 
 	tunnel.Listen(r.Context())
 
