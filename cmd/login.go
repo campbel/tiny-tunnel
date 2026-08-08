@@ -70,9 +70,6 @@ Examples:
 				return fmt.Errorf("guardian login failed: %w", err)
 			}
 			token = result.AccessToken
-			if result.ExpiresIn > 0 {
-				fmt.Printf("Received access token (valid for %s).\n", (time.Duration(result.ExpiresIn) * time.Second).String())
-			}
 		}
 
 		// Save token to config with original server string to preserve all details
