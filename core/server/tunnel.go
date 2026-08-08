@@ -3,11 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/internal/log"
@@ -101,135 +99,10 @@ func (s *Tunnel) Close() {
 	s.tunnel.Close()
 }
 
-// HandleSSERequest handles Server-Sent Events connections
-// It establishes a streaming connection from client to server
-func (s *Tunnel) HandleSSERequest(w http.ResponseWriter, r *http.Request) {
-	// Set SSE headers
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-	// Flush headers immediately
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	} else {
-		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	// Create buffered response channel for better ordering
-	responseChannel := make(chan protocol.Message, 100) // Buffer size to reduce chances of out-of-order delivery
-
-	// Notify client about the SSE request
-	clean, err := s.tunnel.SendWithResponseChannel(protocol.MessageKindSSERequest, &protocol.SSERequestPayload{
-		Path:    r.URL.Path + "?" + r.URL.Query().Encode(),
-		Headers: r.Header,
-	}, responseChannel)
-	if err != nil {
-		s.l.Error("failed to send SSE request", "error", err.Error())
-		return
-	}
-	defer clean()
-
-	// Create a buffer to hold out-of-order messages until they can be delivered in order
-	messageBuffer := make(map[int]protocol.SSEMessagePayload)
-	expectedSequence := 0
-
-	// Create a serialization point with a mutex to ensure ordered writes
-	var writeMutex sync.Mutex
-
-	// Function to handle writing SSE messages in a synchronized manner
-	writeSSEMessage := func(data string) {
-		writeMutex.Lock()
-		defer writeMutex.Unlock()
-
-		s.l.Debug("writing SSE message", "data", data)
-		fmt.Fprintf(w, data+"\n\n")
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
-	}
-
-	// Function to process buffered messages in order
-	processBufferedMessages := func() {
-		writeMutex.Lock()
-		defer writeMutex.Unlock()
-
-		// Keep processing messages as long as we have the next expected sequence
-		for {
-			msg, ok := messageBuffer[expectedSequence]
-			if !ok {
-				break // Don't have the next message yet
-			}
-
-			// Write the message and remove it from the buffer
-			s.l.Debug("writing buffered SSE message", "sequence", expectedSequence, "data", msg.Data)
-			fmt.Fprintf(w, msg.Data+"\n\n")
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
-			}
-
-			delete(messageBuffer, expectedSequence)
-			expectedSequence++
-		}
-	}
-
-	for response := range responseChannel {
-		if response.Kind == protocol.MessageKindSSEClose {
-			return
-		}
-		if response.Kind != protocol.MessageKindSSEMessage {
-			s.l.Error("received unexpected message kind", "kind", response.Kind)
-			return
-		}
-
-		var sseMessage protocol.SSEMessagePayload
-		if err := json.Unmarshal(response.Payload, &sseMessage); err != nil {
-			s.l.Error("failed to unmarshal SSE message", "error", err.Error())
-			return
-		}
-
-		// Handle backward compatibility for older clients that don't use sequence numbers
-		// Default sequential handling for legacy clients
-		legacyClient := false
-
-		// Check if this might be a message from an older client version
-		if sseMessage.Sequence == 0 {
-			// Look at other messages in the buffer to see if we have sequence numbers
-			if len(messageBuffer) == 0 && expectedSequence == 0 {
-				// This is likely the first message and it has no sequence
-				// Assume this is an older client that doesn't support sequencing
-				legacyClient = true
-				s.l.Debug("detected legacy client without sequence numbers")
-			}
-		}
-
-		if legacyClient {
-			// For legacy clients, we just write messages in the order they arrive
-			writeSSEMessage(sseMessage.Data)
-		} else {
-			// Standard sequence-based processing for newer clients
-			if sseMessage.Sequence == expectedSequence {
-				// This is the message we're expecting next, write it immediately
-				writeSSEMessage(sseMessage.Data)
-				expectedSequence++
-
-				// Check if we have subsequent messages buffered
-				processBufferedMessages()
-			} else if sseMessage.Sequence > expectedSequence {
-				// This message arrived early, buffer it for later
-				s.l.Debug("buffering out-of-order SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
-				messageBuffer[sseMessage.Sequence] = sseMessage
-			} else {
-				// This message is a duplicate or arrived very late (we already processed past this sequence)
-				s.l.Warn("received outdated SSE message", "sequence", sseMessage.Sequence, "expected", expectedSequence)
-			}
-		}
-	}
-	s.l.Debug("SSE connection closed")
-}
-
+// HandleHttpRequest proxies an HTTP request through the tunnel. The client
+// responds either with a single buffered HttpResponse, or with a stream
+// (HttpResponseStart, then HttpResponseChunk*, then HttpResponseEnd) for
+// responses of unknown length (SSE, k8s watch streams, log follows, ...).
 func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
 	// Handle WebSocket requests
 	if r.Header.Get("Upgrade") == "websocket" {
@@ -237,52 +110,75 @@ func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detect SSE requests by Accept header or conventional path suffixes
-	acceptHeader := r.Header.Get("Accept")
-	if acceptHeader == "text/event-stream" ||
-		strings.HasSuffix(r.URL.Path, "/events") ||
-		strings.HasSuffix(r.URL.Path, "/sse") {
-		s.l.Debug("detected SSE request", "path", r.URL.Path, "accept", acceptHeader)
-		s.HandleSSERequest(w, r)
-		return
-	}
-
-	// Process regular HTTP requests
-	responseChannel := make(chan protocol.Message)
-
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
 
+	path := r.URL.Path
+	if r.URL.RawQuery != "" {
+		path += "?" + r.URL.RawQuery
+	}
+
+	// Buffered so the tunnel read loop can deliver ahead of the consumer;
+	// if it fills up, backpressure is applied to the tunnel.
+	responseChannel := make(chan protocol.Message, 64)
+
 	start := time.Now()
-	clean, err := s.tunnel.SendWithResponseChannel(protocol.MessageKindHttpRequest, &protocol.HttpRequestPayload{
+	requestID, clean, err := s.tunnel.SendWithResponseChannel(protocol.MessageKindHttpRequest, &protocol.HttpRequestPayload{
 		Method:  r.Method,
-		Path:    r.URL.Path + "?" + r.URL.Query().Encode(),
+		Path:    path,
 		Headers: r.Header,
 		Body:    bodyBytes,
 	}, responseChannel)
 	if err != nil {
 		s.l.Error("failed to send HTTP request", "error", err.Error())
+		http.Error(w, "", http.StatusBadGateway)
 		return
 	}
 	defer clean()
 
-	response := <-responseChannel
-
-	// If the response is not a HttpResponse, we need to return an error
-	if response.Kind != protocol.MessageKindHttpResponse {
-		http.Error(w, "", http.StatusInternalServerError)
+	// Wait for the first response message
+	var first protocol.Message
+	select {
+	case first = <-responseChannel:
+	case <-r.Context().Done():
+		// Downstream consumer went away before the client responded;
+		// tell the client to cancel the upstream request.
+		s.sendStreamCancel(requestID)
+		return
+	case <-s.tunnel.Done():
+		http.Error(w, "tunnel closed", http.StatusBadGateway)
 		return
 	}
 
+	switch first.Kind {
+	case protocol.MessageKindHttpResponse:
+		s.writeBufferedResponse(w, first, start)
+	case protocol.MessageKindHttpResponseStart:
+		s.writeStreamedResponse(w, r, requestID, first, responseChannel, start)
+	default:
+		s.l.Error("received unexpected message kind", "kind", first.Kind)
+		http.Error(w, "", http.StatusInternalServerError)
+	}
+}
+
+func (s *Tunnel) writeBufferedResponse(w http.ResponseWriter, msg protocol.Message, start time.Time) {
 	var responsePayload protocol.HttpResponsePayload
-	if err := json.Unmarshal(response.Payload, &responsePayload); err != nil {
+	if err := json.Unmarshal(msg.Payload, &responsePayload); err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
 	s.l.Debug("received response", "duration", time.Since(start), "status", responsePayload.Response.Status)
+
+	if responsePayload.Response.Status == 0 {
+		// The client failed to reach the target (error responses don't carry
+		// a status). Return a gateway error rather than panicking on
+		// WriteHeader(0).
+		http.Error(w, "", http.StatusBadGateway)
+		return
+	}
 
 	for k, v := range responsePayload.Response.Headers {
 		for _, vv := range v {
@@ -292,6 +188,111 @@ func (s *Tunnel) HandleHttpRequest(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(responsePayload.Response.Status)
 	w.Write(responsePayload.Response.Body)
+}
+
+func (s *Tunnel) writeStreamedResponse(w http.ResponseWriter, r *http.Request, requestID string, first protocol.Message, responseChannel chan protocol.Message, start time.Time) {
+	var startPayload protocol.HttpResponseStartPayload
+	if err := json.Unmarshal(first.Payload, &startPayload); err != nil {
+		s.l.Error("failed to unmarshal stream start", "error", err.Error())
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	for k, v := range startPayload.Headers {
+		// Let net/http manage framing of the streamed response itself.
+		if strings.EqualFold(k, "Content-Length") || strings.EqualFold(k, "Transfer-Encoding") {
+			continue
+		}
+		for _, vv := range v {
+			w.Header().Add(k, vv)
+		}
+	}
+
+	status := startPayload.Status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	w.WriteHeader(status)
+	flusher.Flush()
+
+	s.l.Debug("stream started", "status", status, "duration", time.Since(start))
+
+	for {
+		select {
+		case msg := <-responseChannel:
+			switch msg.Kind {
+			case protocol.MessageKindHttpResponseChunk:
+				var chunk protocol.HttpResponseChunkPayload
+				if err := json.Unmarshal(msg.Payload, &chunk); err != nil {
+					s.l.Error("failed to unmarshal stream chunk", "error", err.Error())
+					return
+				}
+				if _, err := w.Write(chunk.Data); err != nil {
+					s.l.Debug("downstream write failed, cancelling stream", "error", err.Error())
+					s.sendStreamCancel(requestID)
+					s.drainUntilEnd(responseChannel)
+					return
+				}
+				flusher.Flush()
+			case protocol.MessageKindHttpResponseEnd:
+				var end protocol.HttpResponseEndPayload
+				if err := json.Unmarshal(msg.Payload, &end); err == nil && end.Error != "" {
+					s.l.Error("stream ended with error", "error", end.Error)
+				}
+				s.l.Debug("stream ended", "duration", time.Since(start))
+				return
+			default:
+				s.l.Error("received unexpected message kind during stream", "kind", msg.Kind)
+				return
+			}
+		case <-r.Context().Done():
+			// Downstream consumer disconnected; cancel upstream and drain
+			// remaining messages so the tunnel read loop is never blocked
+			// on our abandoned channel.
+			s.l.Debug("downstream disconnected, cancelling stream", "request_id", requestID)
+			s.sendStreamCancel(requestID)
+			s.drainUntilEnd(responseChannel)
+			return
+		case <-s.tunnel.Done():
+			return
+		}
+	}
+}
+
+func (s *Tunnel) sendStreamCancel(requestID string) {
+	if s.tunnel.IsClosed() {
+		return
+	}
+	if err := s.tunnel.Send(protocol.MessageKindHttpStreamCancel, &protocol.HttpStreamCancelPayload{
+		RequestID: requestID,
+	}); err != nil {
+		s.l.Error("failed to send stream cancel", "error", err.Error())
+	}
+}
+
+// drainUntilEnd consumes stream messages until the client acknowledges the
+// end of the stream (or a timeout), keeping the tunnel read loop unblocked.
+func (s *Tunnel) drainUntilEnd(responseChannel chan protocol.Message) {
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case msg := <-responseChannel:
+			if msg.Kind == protocol.MessageKindHttpResponseEnd {
+				return
+			}
+		case <-timeout:
+			s.l.Warn("timed out draining stream after cancel")
+			return
+		case <-s.tunnel.Done():
+			return
+		}
+	}
 }
 
 func (s *Tunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) {
@@ -309,8 +310,8 @@ func (s *Tunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) 
 
 	conn := safe.NewWSConn(rawConn)
 
-	responseChannel := make(chan protocol.Message)
-	clean, err := s.tunnel.SendWithResponseChannel(protocol.MessageKindWebsocketCreateRequest, &protocol.WebsocketCreateRequestPayload{
+	responseChannel := make(chan protocol.Message, 1)
+	_, clean, err := s.tunnel.SendWithResponseChannel(protocol.MessageKindWebsocketCreateRequest, &protocol.WebsocketCreateRequestPayload{
 		Origin: r.Header.Get("Origin"),
 		Path:   r.URL.Path,
 	}, responseChannel)
@@ -320,7 +321,13 @@ func (s *Tunnel) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) 
 	}
 	defer clean()
 
-	response := <-responseChannel
+	var response protocol.Message
+	select {
+	case response = <-responseChannel:
+	case <-s.tunnel.Done():
+		http.Error(w, "tunnel closed", http.StatusBadGateway)
+		return
+	}
 
 	if response.Kind != protocol.MessageKindWebsocketCreateResponse {
 		http.Error(w, "", http.StatusInternalServerError)

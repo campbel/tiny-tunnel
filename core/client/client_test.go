@@ -163,81 +163,84 @@ func TestClientWebsocket(t *testing.T) {
 	// assert.Equal(1, tracker.GetWebsocketStats().TotalMessagesRecv)
 }
 
-func TestClientServerSentEvents(t *testing.T) {
+func TestClientStreamingResponse(t *testing.T) {
 	assert := assert.New(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	_, connChan, responseChan, tracker := setupTestScenario(t, ctx, func(w http.ResponseWriter, r *http.Request) {
-		// prepare the header
+		// SSE-style streaming response: no Content-Length, flushed events.
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 
+		flusher := w.(http.Flusher)
 		for i := 0; i < 3; i++ {
-			select {
-			case <-r.Context().Done():
-				return
-			default:
-				writeEvent(w, Event{
-					ID:   fmt.Sprintf("%d", i),
-					Type: "message",
-					Data: fmt.Sprintf("foo %d", i),
-				})
-			}
+			writeEvent(w, Event{
+				ID:   fmt.Sprintf("%d", i),
+				Type: "message",
+				Data: fmt.Sprintf("foo %d", i),
+			})
+			flusher.Flush()
 		}
 	})
 
 	// Wait for the websocket connection to be ready
 	safeConn := <-connChan
 
-	// Update stats manually for test - as we're not modifying app code
-	tracker.IncrementSseConnection()
-
 	safeConn.WriteJSON(protocol.Message{
 		ID:   uuid.New().String(),
-		Kind: protocol.MessageKindSSERequest,
-		Payload: JSON(protocol.SSERequestPayload{
-			Path: "/",
+		Kind: protocol.MessageKindHttpRequest,
+		Payload: JSON(protocol.HttpRequestPayload{
+			Method: "GET",
+			Path:   "/",
+			Headers: map[string][]string{
+				"Accept": {"text/event-stream"},
+			},
 		}),
 	})
 
-	messages := []string{}
+	// First message must be the stream start with status and headers.
+	msg := <-responseChan
+	assert.Equal(protocol.MessageKindHttpResponseStart, msg.Kind)
+	var start protocol.HttpResponseStartPayload
+	assert.NoError(json.Unmarshal(msg.Payload, &start))
+	assert.Equal(200, start.Status)
+	assert.Equal("text/event-stream", start.Headers.Get("Content-Type"))
+
+	// Then chunks until the end message; concatenated they must be the exact
+	// bytes the target wrote, in order.
+	var body []byte
 LOOP:
 	for {
 		select {
 		case msg := <-responseChan:
-			if msg.Kind == protocol.MessageKindSSEClose {
+			switch msg.Kind {
+			case protocol.MessageKindHttpResponseChunk:
+				var chunk protocol.HttpResponseChunkPayload
+				assert.NoError(json.Unmarshal(msg.Payload, &chunk))
+				body = append(body, chunk.Data...)
+			case protocol.MessageKindHttpResponseEnd:
+				var end protocol.HttpResponseEndPayload
+				assert.NoError(json.Unmarshal(msg.Payload, &end))
+				assert.Empty(end.Error)
 				break LOOP
+			default:
+				t.Fatalf("unexpected message kind %d", msg.Kind)
 			}
-			assert.Equal(msg.Kind, protocol.MessageKindSSEMessage)
-			var payload protocol.SSEMessagePayload
-			err := json.Unmarshal(msg.Payload, &payload)
-			assert.NoError(err)
-			messages = append(messages, payload.Data)
-		case <-time.After(1 * time.Second):
-			t.Fatal("timeout")
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for stream messages")
 		}
 	}
 
-	// Messages format has changed due to how SSE messages are built
-	// Our implementation combines multiple lines into a single message with newlines
-	expectedMessages := []string{
-		"id: 0\nevent: message\ndata: foo 0",
-		"id: 1\nevent: message\ndata: foo 1",
-		"id: 2\nevent: message\ndata: foo 2",
-	}
-	assert.Equal(expectedMessages, messages)
-	
-	// Also need to decrement the SSE connection counter for the test
-	tracker.DecrementSseConnection()
-	
+	expected := "id: 0\nevent: message\ndata: foo 0\n\n" +
+		"id: 1\nevent: message\ndata: foo 1\n\n" +
+		"id: 2\nevent: message\ndata: foo 2\n\n"
+	assert.Equal(expected, string(body))
+
+	// Stream connection stats are tracked via the SSE counters.
 	assert.Equal(1, tracker.GetSseStats().TotalConnections)
 	assert.Equal(0, tracker.GetSseStats().ActiveConnections)
-	// Message count metrics have changed with our implementation, we're not testing this metric directly
-	// since it's not critical to the functionality
 }
 
 func setupTestScenario(t *testing.T, ctx context.Context, handler func(w http.ResponseWriter, r *http.Request)) (*shared.Tunnel, chan *safe.WSConn, chan protocol.Message, *stats.TestStatsProvider) {

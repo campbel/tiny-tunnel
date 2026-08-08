@@ -1,10 +1,14 @@
 package stats
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 var _ StatsProvider = &TestStatsProvider{}
 
 type TestStatsProvider struct {
+	mu                    sync.Mutex
 	websocketConnections  int
 	websocketMessagesSent int
 	websocketMessagesRecv int
@@ -19,46 +23,68 @@ func NewTestStatsProvider() *TestStatsProvider {
 }
 
 func (p *TestStatsProvider) IncrementWebsocketConnection() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.websocketConnections++
 }
 
 func (p *TestStatsProvider) DecrementWebsocketConnection() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.websocketConnections--
 }
 
 func (p *TestStatsProvider) IncrementWebsocketMessageSent() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.websocketMessagesSent++
 }
 
 func (p *TestStatsProvider) IncrementWebsocketMessageRecv() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.websocketMessagesRecv++
 }
 
 func (p *TestStatsProvider) IncrementHttpRequest() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.httpRequests++
 }
 
 func (p *TestStatsProvider) IncrementHttpResponse() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.httpResponses++
 }
 
 func (p *TestStatsProvider) IncrementSseConnection() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.sseConnections++
 }
 
 func (p *TestStatsProvider) DecrementSseConnection() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.sseConnections--
 }
 
 func (p *TestStatsProvider) IncrementSseMessageRecv() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.sseMessagesRecv++
 }
 
 func (p *TestStatsProvider) GetWebsocketConnections() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.websocketConnections
 }
 
 func (p *TestStatsProvider) GetStats() map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return map[string]any{
 		"websocket": p.websocketConnections,
 		"http":      p.httpRequests,
@@ -67,6 +93,8 @@ func (p *TestStatsProvider) GetStats() map[string]any {
 }
 
 func (p *TestStatsProvider) GetHttpStats() HttpStats {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return HttpStats{
 		TotalRequests:  p.httpRequests,
 		TotalResponses: p.httpResponses,
@@ -74,6 +102,8 @@ func (p *TestStatsProvider) GetHttpStats() HttpStats {
 }
 
 func (p *TestStatsProvider) GetWebsocketStats() WebsocketStats {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.websocketConnections < 0 {
 		p.websocketConnections = 0
 	}
@@ -87,6 +117,8 @@ func (p *TestStatsProvider) GetWebsocketStats() WebsocketStats {
 }
 
 func (p *TestStatsProvider) GetSseStats() ServerSentEventsStats {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.sseConnections < 0 {
 		p.sseConnections = 0
 	}
@@ -99,6 +131,8 @@ func (p *TestStatsProvider) GetSseStats() ServerSentEventsStats {
 }
 
 func (p *TestStatsProvider) Reset() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.websocketConnections = 0
 	p.websocketMessagesSent = 0
 	p.websocketMessagesRecv = 0
