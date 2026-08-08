@@ -21,6 +21,8 @@ var (
 	serverHost        string
 	serverPort        string
 	insecure          bool
+	targetInsecure    bool
+	targetCAFile      string
 	allowedIPs        []string
 	reconnectAttempts int
 	targetHeaders     map[string]string
@@ -43,6 +45,8 @@ var startCmd = &cobra.Command{
 			ServerHost:        serverHost,
 			ServerPort:        serverPort,
 			Insecure:          insecure,
+			TargetInsecure:    targetInsecure,
+			TargetCAFile:      targetCAFile,
 			AllowedIPs:        allowedIPs,
 			ReconnectAttempts: reconnectAttempts,
 			TargetHeaders:     convertMapToHeaders(targetHeaders),
@@ -130,6 +134,8 @@ func init() {
 	startCmd.Flags().StringSliceVarP(&allowedIPs, "allowed-ips", "a", []string{"0.0.0.0/0", "::/0"}, "Allowed IPs")
 	startCmd.Flags().IntVarP(&reconnectAttempts, "reconnect-attempts", "r", 5, "Reconnect attempts")
 	startCmd.Flags().StringToStringVarP(&targetHeaders, "target-headers", "T", map[string]string{}, "Target headers")
+	startCmd.Flags().BoolVar(&targetInsecure, "target-insecure", false, "Skip TLS verification for the target (does not affect the server connection)")
+	startCmd.Flags().StringVar(&targetCAFile, "target-ca", "", "Path to a PEM CA bundle used to verify the target's TLS certificate")
 	startCmd.Flags().StringToStringVarP(&serverHeaders, "server-headers", "S", map[string]string{}, "Server headers")
 	startCmd.Flags().StringVar(&token, "token", "", "JWT authentication token")
 	startCmd.Flags().BoolVarP(&enableTUI, "tui", "u", true, "Enable Terminal User Interface")

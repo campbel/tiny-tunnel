@@ -355,6 +355,13 @@ type Options struct {
 	ServerHost        string
 	ServerPort        string
 	Insecure          bool
+	// TargetInsecure skips TLS verification when connecting to the target
+	// (e.g. a local k8s apiserver with a self-signed cert). Unlike Insecure,
+	// it does not affect the connection to the tunnel server.
+	TargetInsecure bool
+	// TargetCAFile is a path to a PEM CA bundle used to verify the target's
+	// TLS certificate.
+	TargetCAFile string
 	AllowedIPs        []string
 	ReconnectAttempts int
 	TargetHeaders     http.Header

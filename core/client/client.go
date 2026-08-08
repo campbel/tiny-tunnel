@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"net/url"
 	"strings"
 	"time"
@@ -93,12 +95,16 @@ func NewTunnel(ctx context.Context, options Options, stateProvider stats.StatePr
 	// HttpResponse message. Responses with unknown length (chunked transfer
 	// encoding, SSE, k8s watch streams, log follows, ...) are streamed back
 	// chunk-by-chunk as HttpResponseStart/Chunk/End messages.
+	targetTLS, err := targetTLSConfig(options)
+	if err != nil {
+		return nil, err
+	}
 	tunnelHttpClient := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: options.Insecure},
+			TLSClientConfig: targetTLS,
 		},
 	}
 
@@ -304,6 +310,30 @@ func streamHttpResponse(
 	}
 }
 
+// targetTLSConfig builds the TLS config used for connections to the target
+// (HTTP and websocket). Verification can be relaxed with TargetInsecure or
+// pinned to a custom CA bundle with TargetCAFile. The legacy Insecure flag is
+// honored for backwards compatibility.
+func targetTLSConfig(options Options) (*tls.Config, error) {
+	cfg := &tls.Config{InsecureSkipVerify: options.Insecure || options.TargetInsecure}
+	if options.TargetCAFile != "" {
+		pem, err := os.ReadFile(options.TargetCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read target CA file: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("no valid certificates in target CA file %s", options.TargetCAFile)
+		}
+		cfg.RootCAs = pool
+		cfg.InsecureSkipVerify = options.Insecure // CA given: verify against it unless server conn is insecure-forced
+		if options.TargetInsecure {
+			cfg.InsecureSkipVerify = true
+		}
+	}
+	return cfg, nil
+}
+
 func handleWebsocketCreateRequest(
 	ctx context.Context,
 	tunnel *shared.Tunnel,
@@ -327,7 +357,17 @@ func handleWebsocketCreateRequest(
 		// We don't need to add token to WebSocket connections as tunnel access doesn't require auth
 		// The token is only needed for /register endpoint which is handled during initial websocket connection
 
-		rawConn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsUrl.String()+payload.Path, wsHeaders)
+		targetTLS, tlsErr := targetTLSConfig(options)
+		if tlsErr != nil {
+			tunnel.SendResponse(protocol.MessageKindWebsocketCreateResponse, id, &protocol.WebsocketCreateResponsePayload{Error: tlsErr})
+			return
+		}
+		wsDialer := &websocket.Dialer{
+			Proxy:            http.ProxyFromEnvironment,
+			HandshakeTimeout: 45 * time.Second,
+			TLSClientConfig:  targetTLS,
+		}
+		rawConn, resp, err := wsDialer.DialContext(ctx, wsUrl.String()+payload.Path, wsHeaders)
 		if err != nil {
 			tunnel.SendResponse(protocol.MessageKindWebsocketCreateResponse, id, &protocol.WebsocketCreateResponsePayload{Error: err})
 			return
