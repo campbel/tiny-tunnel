@@ -21,6 +21,7 @@ var (
 	loginClientID     string
 	loginCallbackPort int
 	loginPasteToken   bool
+	loginDevice       bool
 )
 
 // loginCmd represents the login command
@@ -31,20 +32,38 @@ var loginCmd = &cobra.Command{
 a browser window opens for SSO, and the resulting token is stored for the
 given tunnel server.
 
+In headless environments (no local browser) use --device: the CLI shows a
+short code and a URL to open on any other machine; after approving there,
+the token is delivered to the waiting CLI automatically.
+
 Alternatively pass --paste to enter a credential manually (e.g. a Guardian
 API key starting with dch_).
 
 Examples:
   tnl login tnl.stable.dexus.io
-  tnl login localhost:8080
+  tnl login tnl.stable.dexus.io --device
   tnl login tnl.stable.dexus.io --paste`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.NewBasicLogger(os.Getenv("DEBUG") == "true")
 		originalServer := args[0]
 
+		serverURL, err := parseServerURL(originalServer)
+		if err != nil {
+			return err
+		}
+
 		var token string
-		if loginPasteToken {
+		if loginDevice {
+			result, err := client.DeviceLogin(cmd.Context(), serverURL.String(), func(uri, uriComplete, userCode string) {
+				fmt.Printf("\nTo sign in, open this URL on any machine with a browser:\n\n    %s\n\nand enter the code:\n\n    %s\n\nWaiting for approval...\n", uriComplete, userCode)
+			})
+			if err != nil {
+				return fmt.Errorf("device login failed: %w", err)
+			}
+			token = result.Token
+			fmt.Printf("Approved as %s.\n", result.User)
+		} else if loginPasteToken {
 			fmt.Println("Paste a Guardian credential (API key dch_... or access token).")
 			fmt.Print("Credential: ")
 			tokenBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
@@ -70,6 +89,17 @@ Examples:
 				return fmt.Errorf("guardian login failed: %w", err)
 			}
 			token = result.AccessToken
+
+			// Exchange the 1h Guardian token for a long-lived tnl tunnel
+			// token so the credential survives past Guardian's TTL.
+			if exchanged, expires, err := client.ExchangeToken(cmd.Context(), serverURL.String(), token); err != nil {
+				logger.Debug("token exchange failed, keeping guardian token", "err", err.Error())
+			} else if exchanged != "" {
+				token = exchanged
+				if expires != "" {
+					fmt.Printf("Received tunnel token (valid until %s).\n", expires)
+				}
+			}
 		}
 
 		// Save token to config with original server string to preserve all details
@@ -124,6 +154,7 @@ func init() {
 	loginCmd.Flags().StringVar(&loginClientID, "client-id", "svc_tiny-tunnel_stable", "Guardian service client ID")
 	loginCmd.Flags().IntVar(&loginCallbackPort, "callback-port", 8085, "Localhost port for the OAuth callback (must be registered in Guardian)")
 	loginCmd.Flags().BoolVar(&loginPasteToken, "paste", false, "Paste a credential manually instead of the browser SSO flow")
+	loginCmd.Flags().BoolVar(&loginDevice, "device", false, "Device login for headless environments (approve on another machine)")
 }
 
 // parseServerURL parses a server string into a URL

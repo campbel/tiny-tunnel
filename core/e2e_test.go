@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/campbel/tiny-tunnel/core/client"
 	"github.com/campbel/tiny-tunnel/core/server"
@@ -71,7 +72,29 @@ func TestE2E(t *testing.T) {
 
 	go client.Listen(ctx)
 
+	// The client's websocket dial completes before the server has
+	// necessarily added the tunnel to its routing map; wait for the tunnel
+	// to become routable before asserting on responses.
+	waitForTunnel := func(t *testing.T) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+			req.Host = "test.example.com"
+			resp, err := http.DefaultClient.Do(req)
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatal("tunnel never became routable")
+	}
+
 	t.Run("HTTP Request #1", func(t *testing.T) {
+		waitForTunnel(t)
 		for range 5 {
 			req, _ := http.NewRequest(http.MethodGet, server.URL, nil)
 			req.Host = "test.example.com"

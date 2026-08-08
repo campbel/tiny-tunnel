@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"time"
 )
 
 type Options struct {
@@ -15,6 +16,12 @@ type Options struct {
 	// GuardianAudience is the Guardian service client ID expected in JWT
 	// aud claims (e.g. svc_tiny-tunnel_stable). Empty skips the aud check.
 	GuardianAudience string
+	// SigningKey is a base64-encoded Ed25519 seed used to mint tnl's own
+	// long-lived tunnel tokens (TINY_TUNNEL_SIGNING_KEY). When empty an
+	// ephemeral key is generated: tokens then die with the process.
+	SigningKey string
+	// TokenTTL is the lifetime of vended tunnel tokens (default 30 days).
+	TokenTTL time.Duration
 }
 
 func (o Options) GetTunnelURL(name string) string {
