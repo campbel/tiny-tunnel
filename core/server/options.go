@@ -2,8 +2,6 @@ package server
 
 import (
 	"fmt"
-	"os"
-	"time"
 )
 
 type Options struct {
@@ -11,25 +9,12 @@ type Options struct {
 	AccessScheme string
 	AccessPort   string
 	EnableAuth   bool
-	TokenExpiry  time.Duration
-}
-
-func (o Options) GetJWTSecret() string {
-	return os.Getenv("TINY_TUNNEL_JWT_SECRET")
-}
-
-func (o Options) GetTokenExpiry() time.Duration {
-	expiry, ok := os.LookupEnv("TINY_TUNNEL_TOKEN_EXPIRY")
-	if !ok {
-		return 30 * 24 * time.Hour
-	}
-
-	d, err := time.ParseDuration(expiry)
-	if err != nil {
-		panic(fmt.Sprintf("invalid token expiry: %s", err))
-	}
-
-	return d
+	// GuardianURL is the Guardian base URL / issuer used to verify
+	// credentials when EnableAuth is true (e.g. https://id.stable.dexus.io).
+	GuardianURL string
+	// GuardianAudience is the Guardian service client ID expected in JWT
+	// aud claims (e.g. svc_tiny-tunnel_stable). Empty skips the aud check.
+	GuardianAudience string
 }
 
 func (o Options) GetTunnelURL(name string) string {
