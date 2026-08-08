@@ -20,6 +20,7 @@ var (
 	enableAuth       bool
 	guardianURL      string
 	guardianAudience string
+	tokenTTL         time.Duration
 	accessPort       string
 	accessScheme     string
 )
@@ -40,6 +41,8 @@ var serveCmd = &cobra.Command{
 			EnableAuth:       enableAuth,
 			GuardianURL:      guardianURL,
 			GuardianAudience: guardianAudience,
+			SigningKey:       os.Getenv("TINY_TUNNEL_SIGNING_KEY"),
+			TokenTTL:         tokenTTL,
 			AccessScheme:     accessScheme,
 			AccessPort:       accessPort,
 		}, logger)
@@ -78,6 +81,7 @@ func init() {
 	serveCmd.Flags().BoolVarP(&enableAuth, "enable-auth", "", false, "Enable authentication (credentials verified against Guardian)")
 	serveCmd.Flags().StringVarP(&guardianURL, "guardian-url", "", "https://id.stable.dexus.io", "Guardian base URL used to verify credentials")
 	serveCmd.Flags().StringVarP(&guardianAudience, "guardian-audience", "", "svc_tiny-tunnel_stable", "Guardian service client ID expected in JWT aud claims (empty skips the check)")
+	serveCmd.Flags().DurationVarP(&tokenTTL, "token-ttl", "", 30*24*time.Hour, "Lifetime of vended tunnel tokens (signing key from TINY_TUNNEL_SIGNING_KEY)")
 	serveCmd.Flags().StringVarP(&accessPort, "access-port", "", "", "Port to access the tunnel on")
 	serveCmd.Flags().StringVarP(&accessScheme, "access-scheme", "", "https", "Scheme to access the tunnel on")
 }

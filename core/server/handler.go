@@ -13,6 +13,7 @@ import (
 	"github.com/campbel/tiny-tunnel/internal/guardian"
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/campbel/tiny-tunnel/internal/safe"
+	"github.com/campbel/tiny-tunnel/internal/tunneltoken"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
@@ -29,7 +30,16 @@ type Handler struct {
 	upgrader websocket.Upgrader
 	tunnels  *safe.Map[string, *Tunnel]
 	verifier *guardian.Verifier
+	signer   *tunneltoken.Signer
+	devices  *deviceStore
 	l        log.Logger
+}
+
+// identityFromContext returns the authenticated identity stored by
+// authTokenMiddleware.
+func identityFromContext(ctx context.Context) (guardian.Identity, bool) {
+	identity, ok := ctx.Value(identityContextKey).(guardian.Identity)
+	return identity, ok
 }
 
 func NewHandler(options Options, logger log.Logger) http.Handler {
@@ -49,6 +59,26 @@ func NewHandler(options Options, logger log.Logger) http.Handler {
 			URL:      options.GuardianURL,
 			Audience: options.GuardianAudience,
 		})
+		server.devices = newDeviceStore()
+
+		// tnl-minted tunnel tokens: long-lived credentials vended after a
+		// Guardian login (browser exchange or device flow).
+		if options.SigningKey != "" {
+			signer, err := tunneltoken.NewSigner(options.SigningKey, options.TokenTTL)
+			if err != nil {
+				logger.Error("invalid TINY_TUNNEL_SIGNING_KEY, falling back to ephemeral key", "err", err.Error())
+			} else {
+				server.signer = signer
+			}
+		}
+		if server.signer == nil {
+			signer, err := tunneltoken.NewEphemeralSigner(options.TokenTTL)
+			if err != nil {
+				panic(fmt.Sprintf("failed to generate ephemeral signing key: %s", err))
+			}
+			logger.Warn("no TINY_TUNNEL_SIGNING_KEY set: using an ephemeral signing key — vended tunnel tokens will not survive a restart")
+			server.signer = signer
+		}
 	}
 
 	router := mux.NewRouter()
@@ -64,6 +94,13 @@ func NewHandler(options Options, logger log.Logger) http.Handler {
 		router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", ui.GetHandler()))
 		router.HandleFunc("/", server.HandleRoot)
 		router.HandleFunc("/api/auth-test", server.authTokenMiddleware(server.HandleAuthTest))
+		// Device authorization flow (headless login) + token exchange.
+		router.HandleFunc("/device", server.HandleDevicePage)
+		router.HandleFunc("/device/authorize", server.HandleDeviceAuthorize)
+		router.HandleFunc("/auth/callback", server.HandleAuthCallback)
+		router.HandleFunc("/api/device/start", server.HandleDeviceStart)
+		router.HandleFunc("/api/device/poll", server.HandleDevicePoll)
+		router.HandleFunc("/api/token/exchange", server.authTokenMiddleware(server.HandleTokenExchange))
 	} else {
 		router.HandleFunc("/register", server.HandleRegister)
 		router.HandleFunc("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -168,16 +205,35 @@ func (s *Handler) authTokenMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		identity, err := s.verifier.Verify(r.Context(), credential)
-		if err != nil {
-			if errors.Is(err, guardian.ErrInvalidCredential) {
-				s.l.Info("rejected credential", "err", err.Error())
+		var identity guardian.Identity
+		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(credential), "Bearer "))
+		if tunneltoken.IsTunnelToken(trimmed) {
+			// tnl-minted long-lived tunnel token: verified locally.
+			tunnelIdentity, err := s.signer.Verify(trimmed)
+			if err != nil {
+				s.l.Info("rejected tunnel token", "err", err.Error())
 				http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
-			} else {
-				s.l.Error("guardian verification failed", "err", err.Error())
-				http.Error(w, "Auth service unavailable", http.StatusBadGateway)
+				return
 			}
-			return
+			identity = guardian.Identity{
+				Sub:       tunnelIdentity.Sub,
+				Email:     tunnelIdentity.Email,
+				Method:    "tunnel",
+				ExpiresAt: tunnelIdentity.ExpiresAt,
+			}
+		} else {
+			var err error
+			identity, err = s.verifier.Verify(r.Context(), credential)
+			if err != nil {
+				if errors.Is(err, guardian.ErrInvalidCredential) {
+					s.l.Info("rejected credential", "err", err.Error())
+					http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
+				} else {
+					s.l.Error("guardian verification failed", "err", err.Error())
+					http.Error(w, "Auth service unavailable", http.StatusBadGateway)
+				}
+				return
+			}
 		}
 
 		r = r.WithContext(context.WithValue(r.Context(), identityContextKey, identity))
