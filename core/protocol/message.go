@@ -13,9 +13,16 @@ const (
 	MessageKindWebsocketCreateResponse
 	MessageKindWebsocketMessage
 	MessageKindWebsocketClose
-	MessageKindSSERequest
-	MessageKindSSEMessage
-	MessageKindSSEClose
+	// Streaming HTTP responses. A response to an HttpRequest may either be a
+	// single buffered HttpResponse, or a stream: one HttpResponseStart,
+	// followed by zero or more HttpResponseChunk, terminated by HttpResponseEnd.
+	// All stream messages carry the originating request ID in RE.
+	MessageKindHttpResponseStart
+	MessageKindHttpResponseChunk
+	MessageKindHttpResponseEnd
+	// HttpStreamCancel is sent by the server to the client when the downstream
+	// consumer disconnects, so the client can cancel the upstream request.
+	MessageKindHttpStreamCancel
 )
 
 type Message struct {
@@ -106,16 +113,25 @@ type WebsocketCloseMessage struct {
 	SessionID string `json:"session_id,omitempty"`
 }
 
-type SSERequestPayload struct {
-	Path    string      `json:"path,omitempty"`
+// HttpResponseStartPayload begins a streamed HTTP response.
+type HttpResponseStartPayload struct {
+	Status  int         `json:"status"`
 	Headers http.Header `json:"headers,omitempty"`
 }
 
-type SSEMessagePayload struct {
-	Data     string `json:"data,omitempty"`
-	Sequence int    `json:"sequence,omitempty"` // Sequence number to ensure correct ordering
+// HttpResponseChunkPayload carries raw response body bytes, relayed verbatim
+// and in order.
+type HttpResponseChunkPayload struct {
+	Data []byte `json:"data"`
 }
 
-type SSEClosePayload struct {
+// HttpResponseEndPayload terminates a streamed HTTP response.
+type HttpResponseEndPayload struct {
 	Error string `json:"error,omitempty"`
+}
+
+// HttpStreamCancelPayload asks the client to cancel an in-flight streamed
+// response identified by the originating request ID.
+type HttpStreamCancelPayload struct {
+	RequestID string `json:"request_id"`
 }

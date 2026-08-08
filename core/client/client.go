@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -12,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/core/protocol"
@@ -90,9 +88,12 @@ func NewTunnel(ctx context.Context, options Options, stateProvider stats.StatePr
 	})
 
 	// HTTP
-	// Requests are sent to the target and response send back to the server.
-	// Each request is 1:1 to a response which makes this fairly trivial.
-	httpClient = &http.Client{
+	// Requests are sent to the target and the response is relayed back to the
+	// server. Responses with a known length are buffered and sent as a single
+	// HttpResponse message. Responses with unknown length (chunked transfer
+	// encoding, SSE, k8s watch streams, log follows, ...) are streamed back
+	// chunk-by-chunk as HttpResponseStart/Chunk/End messages.
+	tunnelHttpClient := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -101,57 +102,22 @@ func NewTunnel(ctx context.Context, options Options, stateProvider stats.StatePr
 		},
 	}
 
+	// activeStreams tracks in-flight streamed responses by request ID so the
+	// server can cancel the upstream request when the downstream consumer
+	// disconnects.
+	activeStreams := safe.NewMap[string, context.CancelFunc]()
+
 	tunnel.RegisterHttpRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.HttpRequestPayload) {
-		l.Debug("handling http request", "payload", payload)
+		// Handlers run on the tunnel read loop; do the actual work in a
+		// goroutine so slow targets don't block the tunnel.
+		go handleHttpRequest(tunnel, id, payload, options, tunnelHttpClient, activeStreams, statsProvider, l)
+	})
 
-		// Track request time
-		startTime := time.Now()
-		statsProvider.IncrementHttpRequest()
-
-		url_ := options.Target + payload.Path
-		req, err := http.NewRequest(payload.Method, url_, bytes.NewReader(payload.Body))
-		if err != nil {
-			l.Error("failed to create HTTP request", "error", err.Error())
-			return
+	tunnel.RegisterHttpStreamCancelHandler(func(tunnel *shared.Tunnel, id string, payload protocol.HttpStreamCancelPayload) {
+		l.Debug("handling http stream cancel", "request_id", payload.RequestID)
+		if cancel, ok := activeStreams.Get(payload.RequestID); ok {
+			cancel()
 		}
-
-		for k, v := range payload.Headers {
-			for _, vv := range v {
-				req.Header.Add(k, vv)
-			}
-		}
-
-		// We don't need to add token to HTTP requests as tunnel access doesn't require auth
-		// The token is only needed for /register endpoint which is handled during websocket connection
-
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			statsProvider.IncrementHttpResponse()
-			tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
-			l.Info(payload.Method, payload.Path, 0, time.Since(startTime), err)
-			return
-		}
-		defer resp.Body.Close()
-
-		bodyBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			statsProvider.IncrementHttpResponse()
-			tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
-			l.Info(payload.Method, payload.Path, resp.StatusCode, time.Since(startTime), err)
-			return
-		}
-
-		// Calculate elapsed time
-		elapsed := time.Since(startTime)
-		l.Debug("sending response", "status", resp.StatusCode, "elapsed", elapsed)
-
-		statsProvider.IncrementHttpResponse()
-		l.Info("http request completed", "status", resp.StatusCode, "elapsed", elapsed, "method", payload.Method, "path", payload.Path)
-		tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Response: protocol.HttpResponse{
-			Status:  resp.StatusCode,
-			Headers: resp.Header,
-			Body:    bodyBytes,
-		}})
 	})
 
 	// Websockets
@@ -161,8 +127,195 @@ func NewTunnel(ctx context.Context, options Options, stateProvider stats.StatePr
 	wsSessions := safe.NewMap[string, *safe.WSConn]()
 
 	tunnel.RegisterWebsocketCreateRequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketCreateRequestPayload) {
-		l.Debug("handling websocket create request", "payload", payload)
-		wsUrl, err := util.GetWebsocketURL(options.Target)
+		// Dialing the target can block; run async to keep the tunnel read loop free.
+		go handleWebsocketCreateRequest(ctx, tunnel, id, payload, options, wsSessions, statsProvider, l)
+	})
+
+	tunnel.RegisterWebsocketMessageHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketMessagePayload) {
+		l.Debug("handling websocket message", "payload", payload)
+		conn, ok := wsSessions.Get(payload.SessionID)
+		if !ok {
+			l.Error("websocket session not found", "session_id", payload.SessionID)
+			return
+		}
+		if err := conn.WriteMessage(payload.Kind, payload.Data); err != nil {
+			l.Error("failed to write websocket message", "error", err.Error())
+		}
+		statsProvider.IncrementWebsocketMessageSent()
+	})
+
+	tunnel.RegisterWebsocketCloseHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketClosePayload) {
+		l.Debug("handling websocket close", "payload", payload)
+		conn, ok := wsSessions.Get(payload.SessionID)
+		if !ok {
+			l.Error("websocket session not found", "session_id", payload.SessionID)
+			return
+		}
+		if err := conn.Close(); err != nil {
+			l.Error("failed to close websocket connection", "error", err.Error(), "payload", payload)
+		}
+		wsSessions.Delete(payload.SessionID)
+	})
+
+	return tunnel, nil
+}
+
+// handleHttpRequest proxies a single HTTP request from the tunnel server to
+// the local target, streaming the response back when its length is unknown.
+func handleHttpRequest(
+	tunnel *shared.Tunnel,
+	id string,
+	payload protocol.HttpRequestPayload,
+	options Options,
+	httpClient *http.Client,
+	activeStreams *safe.Map[string, context.CancelFunc],
+	statsProvider stats.StatsProvider,
+	l log.Logger,
+) {
+	l.Debug("handling http request", "method", payload.Method, "path", payload.Path)
+
+	startTime := time.Now()
+	statsProvider.IncrementHttpRequest()
+
+	// The request context is cancelled when the tunnel closes or when the
+	// server tells us the downstream consumer went away (HttpStreamCancel).
+	reqCtx, cancel := context.WithCancel(tunnel.Context())
+	defer cancel()
+
+	activeStreams.SetNX(id, cancel)
+	defer activeStreams.Delete(id)
+
+	url_ := options.Target + payload.Path
+	req, err := http.NewRequestWithContext(reqCtx, payload.Method, url_, bytes.NewReader(payload.Body))
+	if err != nil {
+		l.Error("failed to create HTTP request", "error", err.Error())
+		statsProvider.IncrementHttpResponse()
+		tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
+		return
+	}
+
+	for k, v := range payload.Headers {
+		for _, vv := range v {
+			req.Header.Add(k, vv)
+		}
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		statsProvider.IncrementHttpResponse()
+		tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
+		l.Info("http request failed", "method", payload.Method, "path", payload.Path, "elapsed", time.Since(startTime), "error", err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	if isStreamingResponse(resp) {
+		streamHttpResponse(tunnel, id, payload, resp, statsProvider, l, startTime)
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		statsProvider.IncrementHttpResponse()
+		tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Error: err})
+		l.Info("http request failed", "method", payload.Method, "path", payload.Path, "status", resp.StatusCode, "elapsed", time.Since(startTime), "error", err.Error())
+		return
+	}
+
+	elapsed := time.Since(startTime)
+	statsProvider.IncrementHttpResponse()
+	l.Info("http request completed", "status", resp.StatusCode, "elapsed", elapsed, "method", payload.Method, "path", payload.Path)
+	tunnel.SendResponse(protocol.MessageKindHttpResponse, id, &protocol.HttpResponsePayload{Response: protocol.HttpResponse{
+		Status:  resp.StatusCode,
+		Headers: resp.Header,
+		Body:    bodyBytes,
+	}})
+}
+
+// isStreamingResponse reports whether a response should be relayed
+// chunk-by-chunk instead of buffered. Anything without a known content length
+// (chunked transfer encoding, connection-close streams) is streamed — this
+// covers SSE, k8s watch/informer streams, and log follows alike.
+func isStreamingResponse(resp *http.Response) bool {
+	if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		return true
+	}
+	if resp.ContentLength < 0 {
+		return true
+	}
+	for _, te := range resp.TransferEncoding {
+		if te == "chunked" {
+			return true
+		}
+	}
+	return false
+}
+
+// streamHttpResponse relays the response body as raw byte chunks. Ordering is
+// guaranteed by the tunnel (single websocket, synchronous dispatch).
+func streamHttpResponse(
+	tunnel *shared.Tunnel,
+	id string,
+	payload protocol.HttpRequestPayload,
+	resp *http.Response,
+	statsProvider stats.StatsProvider,
+	l log.Logger,
+	startTime time.Time,
+) {
+	statsProvider.IncrementSseConnection()
+	defer statsProvider.DecrementSseConnection()
+	statsProvider.IncrementHttpResponse()
+
+	l.Info("http stream started", "status", resp.StatusCode, "method", payload.Method, "path", payload.Path)
+
+	if err := tunnel.SendResponse(protocol.MessageKindHttpResponseStart, id, &protocol.HttpResponseStartPayload{
+		Status:  resp.StatusCode,
+		Headers: resp.Header,
+	}); err != nil {
+		l.Error("failed to send stream start", "error", err.Error())
+		return
+	}
+
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			if sendErr := tunnel.SendResponse(protocol.MessageKindHttpResponseChunk, id, &protocol.HttpResponseChunkPayload{Data: chunk}); sendErr != nil {
+				l.Error("failed to send stream chunk", "error", sendErr.Error())
+				return
+			}
+			statsProvider.IncrementSseMessageRecv()
+		}
+		if err != nil {
+			endPayload := &protocol.HttpResponseEndPayload{}
+			if err != io.EOF && !errors.Is(err, context.Canceled) {
+				endPayload.Error = err.Error()
+			}
+			if !tunnel.IsClosed() {
+				if sendErr := tunnel.SendResponse(protocol.MessageKindHttpResponseEnd, id, endPayload); sendErr != nil {
+					l.Error("failed to send stream end", "error", sendErr.Error())
+				}
+			}
+			l.Info("http stream ended", "method", payload.Method, "path", payload.Path, "elapsed", time.Since(startTime), "error", endPayload.Error)
+			return
+		}
+	}
+}
+
+func handleWebsocketCreateRequest(
+	ctx context.Context,
+	tunnel *shared.Tunnel,
+	id string,
+	payload protocol.WebsocketCreateRequestPayload,
+	options Options,
+	wsSessions *safe.Map[string, *safe.WSConn],
+	statsProvider stats.StatsProvider,
+	l log.Logger,
+) {
+	l.Debug("handling websocket create request", "payload", payload)
+	wsUrl, err := util.GetWebsocketURL(options.Target)
 		if err != nil {
 			tunnel.SendResponse(protocol.MessageKindWebsocketCreateResponse, id, &protocol.WebsocketCreateResponsePayload{Error: err})
 			return
@@ -218,195 +371,7 @@ func NewTunnel(ctx context.Context, options Options, stateProvider stats.StatePr
 					l.Error("failed to send websocket message", "error", err.Error())
 				}
 			}
-		}()
-	})
-
-	tunnel.RegisterWebsocketMessageHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketMessagePayload) {
-		l.Debug("handling websocket message", "payload", payload)
-		conn, ok := wsSessions.Get(payload.SessionID)
-		if !ok {
-			l.Error("websocket session not found", "session_id", payload.SessionID)
-			return
-		}
-		if err := conn.WriteMessage(payload.Kind, payload.Data); err != nil {
-			l.Error("failed to write websocket message", "error", err.Error())
-		}
-		statsProvider.IncrementWebsocketMessageSent()
-	})
-
-	tunnel.RegisterWebsocketCloseHandler(func(tunnel *shared.Tunnel, id string, payload protocol.WebsocketClosePayload) {
-		l.Debug("handling websocket close", "payload", payload)
-		conn, ok := wsSessions.Get(payload.SessionID)
-		if !ok {
-			l.Error("websocket session not found", "session_id", payload.SessionID)
-			return
-		}
-		if err := conn.Close(); err != nil {
-			l.Error("failed to close websocket connection", "error", err.Error(), "payload", payload)
-		}
-		wsSessions.Delete(payload.SessionID)
-	})
-
-	// Server-Sent Events
-	tunnel.RegisterSSERequestHandler(func(tunnel *shared.Tunnel, id string, payload protocol.SSERequestPayload) {
-		statsProvider.IncrementSseConnection()
-		defer statsProvider.DecrementSseConnection()
-
-		// Create a context for this SSE request that will be cancelled when the tunnel is closed
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		// Handle tunnel closure by canceling the context
-		go func() {
-			select {
-			case <-tunnel.Done():
-				cancel()
-			case <-ctx.Done():
-				// Context already cancelled
-			}
-		}()
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Target+payload.Path, nil)
-		if err != nil {
-			l.Error("failed to create SSE request", "error", err.Error())
-			return
-		}
-		for k, v := range payload.Headers {
-			for _, vv := range v {
-				req.Header.Add(k, vv)
-			}
-		}
-
-		// We don't need to add token to SSE requests as tunnel access doesn't require auth
-		// The token is only needed for /register endpoint which is handled during initial websocket connection
-
-		// Use a client with context
-		client := &http.Client{
-			Timeout: 10 * time.Second,
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			if ctx.Err() != nil {
-				// Context was cancelled, this is expected
-				return
-			}
-			l.Error("failed to send SSE request", "error", err.Error())
-			return
-		}
-		defer resp.Body.Close()
-
-		// Use a buffered reader for better performance
-		reader := bufio.NewReaderSize(resp.Body, 4096)
-		var messageBuilder strings.Builder
-
-		// Use a mutex to synchronize sending messages and ensure order is preserved
-		var sendMutex sync.Mutex
-
-		// Track sequence number to ensure messages are ordered
-		sequenceNumber := 0
-
-		// Create a function to send messages in a synchronized way with context awareness
-		sendMessage := func(message string) {
-			if message == "" || tunnel.IsClosed() {
-				return
-			}
-
-			sendMutex.Lock()
-			defer sendMutex.Unlock()
-
-			currentSequence := sequenceNumber
-			sequenceNumber++
-
-			if err := tunnel.SendResponse(protocol.MessageKindSSEMessage, id, &protocol.SSEMessagePayload{
-				Data:     message,
-				Sequence: currentSequence,
-			}); err != nil {
-				l.Error("failed to send SSE message", "error", err.Error())
-			} else {
-				statsProvider.IncrementSseMessageRecv()
-			}
-		}
-
-		// Safely try to send a close message at the end
-		sendClose := func() {
-			if tunnel.IsClosed() {
-				return
-			}
-
-			sendMutex.Lock()
-			defer sendMutex.Unlock()
-
-			if err := tunnel.SendResponse(protocol.MessageKindSSEClose, id, &protocol.SSEClosePayload{}); err != nil {
-				l.Error("failed to send SSE close", "error", err.Error())
-			}
-		}
-		defer sendClose()
-
-		done := make(chan struct{})
-		doneOnce := &sync.Once{}
-
-		// Safely close the done channel
-		closeDone := func() {
-			doneOnce.Do(func() {
-				close(done)
-			})
-		}
-
-		// Handle context cancellation in a separate goroutine
-		go func() {
-			select {
-			case <-ctx.Done():
-				// Try to unblock any read by setting a deadline
-				if deadline, ok := resp.Body.(interface{ SetReadDeadline(time.Time) error }); ok {
-					_ = deadline.SetReadDeadline(time.Now())
-				}
-				closeDone()
-			case <-done:
-				// Reading finished normally
-			}
-		}()
-
-		// Read using scanner with done channel for cancellation
-		go func() {
-			defer closeDone()
-
-			scanner := bufio.NewScanner(reader)
-			for scanner.Scan() {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					line := scanner.Text()
-
-					// Empty line indicates end of message
-					if line == "" {
-						message := messageBuilder.String()
-						if message != "" {
-							sendMessage(message)
-							messageBuilder.Reset()
-						}
-						continue
-					}
-
-					// Add line to current message
-					if messageBuilder.Len() > 0 {
-						messageBuilder.WriteString("\n")
-					}
-					messageBuilder.WriteString(line)
-				}
-			}
-
-			// Send any remaining message
-			if messageBuilder.Len() > 0 {
-				sendMessage(messageBuilder.String())
-			}
-		}()
-
-		// Wait for either the context to be cancelled or reading to finish
-		<-done
-	})
-
-	return tunnel, nil
+	}()
 }
 
 // TestAuth verifies if the token is valid by making a request to the auth-test endpoint

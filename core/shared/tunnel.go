@@ -26,8 +26,8 @@ type Tunnel struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 
-	// responseChannels is a map of message IDs to channels that want to receive the response
-	responseChannels *safe.Map[string, []chan protocol.Message]
+	// responseChannels is a map of message IDs to the channel that wants to receive the response
+	responseChannels *safe.Map[string, chan protocol.Message]
 
 	// Handlers
 	handlerRegistry map[int]func(tunnel *Tunnel, id string, payload []byte)
@@ -47,7 +47,7 @@ func NewTunnel(conn *websocket.Conn, l log.Logger) *Tunnel {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Tunnel{
 		conn:             safe.NewWSConn(conn),
-		responseChannels: safe.NewMap[string, []chan protocol.Message](),
+		responseChannels: safe.NewMap[string, chan protocol.Message](),
 		closeChan:        make(chan struct{}),
 		handlerRegistry:  make(map[int]func(tunnel *Tunnel, id string, payload []byte)),
 		context:          make(map[string]interface{}),
@@ -88,20 +88,11 @@ func (t *Tunnel) close(peerSent bool) {
 		t.cancelFunc()
 	}
 
-	// Close the channel to notify any goroutines waiting
+	// Close the channel to notify any goroutines waiting.
+	// Consumers of response channels must select on Done() to unblock;
+	// we intentionally do not close the response channels themselves to
+	// avoid send-on-closed-channel races with the read loop.
 	close(t.closeChan)
-
-	// Clear any response channels to prevent goroutines from blocking
-	t.responseChannels.Range(func(key string, value []chan protocol.Message) bool {
-		for _, ch := range value {
-			// Try to close each channel, ignoring if already closed
-			defer func() {
-				recover() // Recover from panic if channel is already closed
-			}()
-			close(ch)
-		}
-		return true
-	})
 
 	// Close the connection with timeout
 	if !peerSent {
@@ -116,21 +107,24 @@ func (t *Tunnel) close(peerSent bool) {
 	}
 }
 
-func (t *Tunnel) SendWithResponseChannel(kind int, message any, reChan chan protocol.Message) (func(), error) {
+// SendWithResponseChannel sends a message and registers reChan to receive
+// responses addressed to it (RE == returned id). The returned id can be used
+// to reference the request in follow-up messages (e.g. stream cancellation).
+func (t *Tunnel) SendWithResponseChannel(kind int, message any, reChan chan protocol.Message) (string, func(), error) {
 	data, err := json.Marshal(message)
 	if err != nil {
-		return func() {}, err
+		return "", func() {}, err
 	}
 	msg := protocol.Message{
 		ID:      uuid.New().String(),
 		Kind:    kind,
 		Payload: data,
 	}
-	t.responseChannels.SetNX(msg.ID, []chan protocol.Message{reChan})
+	t.responseChannels.SetNX(msg.ID, reChan)
 	clean := func() {
 		t.responseChannels.Delete(msg.ID)
 	}
-	return clean, t.conn.WriteJSON(msg)
+	return msg.ID, clean, t.conn.WriteJSON(msg)
 }
 
 func (t *Tunnel) Send(kind int, message any) error {
@@ -195,32 +189,32 @@ func (t *Tunnel) Listen(ctx context.Context) {
 		t.lastReceiveTime = time.Now()
 		t.lastReceiveMu.Unlock()
 
-		// Handle the message
-		go func(msg protocol.Message) {
+		// Handle the message synchronously so that messages are processed in
+		// the exact order they arrive on the websocket. Handlers that perform
+		// long-running work (e.g. proxying an HTTP request) are responsible
+		// for spawning their own goroutines so they don't block this loop.
 
-			// If a message contains a RE, it is a response to a previous message
-			// We need to send it to the channel(s) waiting for the response
-			if msg.RE != "" {
-				if reChans, ok := t.responseChannels.Get(msg.RE); ok {
-					var wg sync.WaitGroup
-					for _, reChan := range reChans {
-						wg.Add(1)
-						go func(reChan chan protocol.Message) {
-							defer wg.Done()
-							reChan <- msg
-						}(reChan)
-					}
-					wg.Wait()
+		// If a message contains a RE, it is a response to a previous message.
+		// Deliver it in order to the channel waiting for the response. If the
+		// channel's buffer is full this applies backpressure to the tunnel;
+		// consumers must keep draining until the stream ends. Done() unblocks
+		// delivery when the tunnel closes.
+		if msg.RE != "" {
+			if reChan, ok := t.responseChannels.Get(msg.RE); ok {
+				select {
+				case reChan <- msg:
+				case <-t.closeChan:
+					return
 				}
-				return
 			}
+			continue
+		}
 
-			if handler, ok := t.handlerRegistry[msg.Kind]; ok {
-				handler(t, msg.ID, msg.Payload)
-			} else {
-				t.l.Error("no handler registered for message kind", "kind", msg.Kind)
-			}
-		}(msg)
+		if handler, ok := t.handlerRegistry[msg.Kind]; ok {
+			handler(t, msg.ID, msg.Payload)
+		} else {
+			t.l.Error("no handler registered for message kind", "kind", msg.Kind)
+		}
 	}
 }
 
@@ -290,14 +284,6 @@ func (t *Tunnel) RegisterWebsocketCloseHandler(handler func(tunnel *Tunnel, id s
 	t.registerHandler(protocol.MessageKindWebsocketClose, handlerFunc(handler))
 }
 
-func (t *Tunnel) RegisterSSERequestHandler(handler func(tunnel *Tunnel, id string, payload protocol.SSERequestPayload)) {
-	t.registerHandler(protocol.MessageKindSSERequest, handlerFunc(handler))
-}
-
-func (t *Tunnel) RegisterSSEMessageHandler(handler func(tunnel *Tunnel, id string, payload protocol.SSEMessagePayload)) {
-	t.registerHandler(protocol.MessageKindSSEMessage, handlerFunc(handler))
-}
-
-func (t *Tunnel) RegisterSSECloseHandler(handler func(tunnel *Tunnel, id string, payload protocol.SSEClosePayload)) {
-	t.registerHandler(protocol.MessageKindSSEClose, handlerFunc(handler))
+func (t *Tunnel) RegisterHttpStreamCancelHandler(handler func(tunnel *Tunnel, id string, payload protocol.HttpStreamCancelPayload)) {
+	t.registerHandler(protocol.MessageKindHttpStreamCancel, handlerFunc(handler))
 }

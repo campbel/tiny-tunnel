@@ -94,63 +94,47 @@ func TestHttpPayloads(t *testing.T) {
 	}
 }
 
-func TestSSEPayloads(t *testing.T) {
-	tests := []struct {
-		name    string
-		payload interface{}
-	}{
-		{
-			name: "sse request",
-			payload: SSERequestPayload{
-				Path:    "/events",
-				Headers: http.Header{"Accept": []string{"text/event-stream"}},
-			},
-		},
-		{
-			name: "sse message without sequence",
-			payload: SSEMessagePayload{
-				Data: "event: update\ndata: {\"count\":1}",
-			},
-		},
-		{
-			name: "sse message with sequence",
-			payload: SSEMessagePayload{
-				Data:     "event: update\ndata: {\"count\":2}",
-				Sequence: 5,
-			},
-		},
-		{
-			name: "sse close",
-			payload: SSEClosePayload{
-				Error: "connection closed",
-			},
-		},
-	}
+func TestStreamPayloads(t *testing.T) {
+	t.Run("response start", func(t *testing.T) {
+		p := HttpResponseStartPayload{
+			Status:  200,
+			Headers: http.Header{"Content-Type": []string{"text/event-stream"}},
+		}
+		data, err := json.Marshal(p)
+		assert.NoError(t, err)
+		var decoded HttpResponseStartPayload
+		assert.NoError(t, json.Unmarshal(data, &decoded))
+		assert.Equal(t, p, decoded)
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			data, err := json.Marshal(tt.payload)
-			assert.NoError(t, err)
+	t.Run("response chunk round-trips arbitrary bytes", func(t *testing.T) {
+		p := HttpResponseChunkPayload{
+			Data: []byte("event: update\ndata: {\"count\":1}\n\n\x00\x01\xff"),
+		}
+		data, err := json.Marshal(p)
+		assert.NoError(t, err)
+		var decoded HttpResponseChunkPayload
+		assert.NoError(t, json.Unmarshal(data, &decoded))
+		assert.Equal(t, p, decoded)
+	})
 
-			switch p := tt.payload.(type) {
-			case SSERequestPayload:
-				var decoded SSERequestPayload
-				err = json.Unmarshal(data, &decoded)
-				assert.NoError(t, err)
-				assert.Equal(t, p, decoded)
-			case SSEMessagePayload:
-				var decoded SSEMessagePayload
-				err = json.Unmarshal(data, &decoded)
-				assert.NoError(t, err)
-				assert.Equal(t, p, decoded)
-			case SSEClosePayload:
-				var decoded SSEClosePayload
-				err = json.Unmarshal(data, &decoded)
-				assert.NoError(t, err)
-				assert.Equal(t, p, decoded)
-			}
-		})
-	}
+	t.Run("response end", func(t *testing.T) {
+		p := HttpResponseEndPayload{Error: "connection closed"}
+		data, err := json.Marshal(p)
+		assert.NoError(t, err)
+		var decoded HttpResponseEndPayload
+		assert.NoError(t, json.Unmarshal(data, &decoded))
+		assert.Equal(t, p, decoded)
+	})
+
+	t.Run("stream cancel", func(t *testing.T) {
+		p := HttpStreamCancelPayload{RequestID: "abc-123"}
+		data, err := json.Marshal(p)
+		assert.NoError(t, err)
+		var decoded HttpStreamCancelPayload
+		assert.NoError(t, json.Unmarshal(data, &decoded))
+		assert.Equal(t, p, decoded)
+	})
 }
 
 func TestWebsocketPayloads(t *testing.T) {
