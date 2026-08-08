@@ -2,15 +2,17 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/campbel/tiny-tunnel/core/server/ui"
+	"github.com/campbel/tiny-tunnel/internal/guardian"
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/campbel/tiny-tunnel/internal/safe"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
@@ -19,19 +21,14 @@ import (
 type contextKey string
 
 const (
-	claimsContextKey contextKey = "claims"
+	identityContextKey contextKey = "identity"
 )
-
-type Claims struct {
-	Email  string   `json:"email"`
-	Scopes []string `json:"scopes"`
-	jwt.RegisteredClaims
-}
 
 type Handler struct {
 	options  Options
 	upgrader websocket.Upgrader
 	tunnels  *safe.Map[string, *Tunnel]
+	verifier *guardian.Verifier
 	l        log.Logger
 }
 
@@ -47,18 +44,25 @@ func NewHandler(options Options, logger log.Logger) http.Handler {
 		l:       logger,
 	}
 
+	if options.EnableAuth {
+		server.verifier = guardian.NewVerifier(guardian.Config{
+			URL:      options.GuardianURL,
+			Audience: options.GuardianAudience,
+		})
+	}
+
 	router := mux.NewRouter()
 	router.Host(fmt.Sprintf("{tunnel:[a-z0-9-]+}.%s", options.Hostname)).HandlerFunc(server.HandleTunnelRequest)
 
 	if options.EnableAuth {
-		// Wrap /register with token auth middleware
+		// Wrap /register with Guardian auth middleware. Credentials are
+		// Guardian user JWTs (verified locally via JWKS) or dch_ API keys
+		// (resolved against Guardian). Token minting, login pages, and the
+		// okta header dance all live in Guardian now — not here.
 		router.HandleFunc("/register", server.authTokenMiddleware(server.HandleRegister))
 		// Serve static files for the UI
 		router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", ui.GetHandler()))
-		// API endpoint for token generation with email auth middleware
-		router.HandleFunc("/login", server.authEmailMiddleware(server.HandleLogin))
 		router.HandleFunc("/", server.HandleRoot)
-		router.HandleFunc("/api/token", server.HandleGenerateToken)
 		router.HandleFunc("/api/auth-test", server.authTokenMiddleware(server.HandleAuthTest))
 	} else {
 		router.HandleFunc("/register", server.HandleRegister)
@@ -100,24 +104,6 @@ func (s *Handler) HandleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(indexHTML))
 }
 
-func (s *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("X-TT-Tunnel") != "" {
-		s.HandleTunnelRequest(w, r)
-		return
-	}
-
-	// Serve our login.html
-	loginData, err := ui.StaticFiles.ReadFile("static/login.html")
-	if err != nil {
-		s.l.Error("error reading login.html", "err", err)
-		http.Error(w, "Error loading login page", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(loginData)
-}
-
 func (s *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	name := r.FormValue("name")
 	if name == "" {
@@ -125,30 +111,15 @@ func (s *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if auth is enabled and validate claims
+	// When auth is enabled the Guardian middleware has already verified the
+	// credential; log who is registering.
 	if s.options.EnableAuth {
-		claims, ok := r.Context().Value(claimsContextKey).(*Claims)
+		identity, ok := r.Context().Value(identityContextKey).(guardian.Identity)
 		if !ok {
-			http.Error(w, "unauthorized: invalid token claims", http.StatusUnauthorized)
+			http.Error(w, "unauthorized: missing identity", http.StatusUnauthorized)
 			return
 		}
-
-		// Verify the token has the tunnel:create scope
-		hasScope := false
-		for _, scope := range claims.Scopes {
-			if scope == "tunnel:create" {
-				hasScope = true
-				break
-			}
-		}
-
-		if !hasScope {
-			http.Error(w, "forbidden: missing required scope", http.StatusForbidden)
-			return
-		}
-
-		// Log the registration with user info
-		s.l.Info("tunnel registration attempt", "name", name, "email", claims.Email)
+		s.l.Info("tunnel registration attempt", "name", name, "user", identity.String(), "auth_method", identity.Method)
 	}
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
@@ -183,105 +154,59 @@ func getHeaderCaseInsensitive(r *http.Request, header string) string {
 	return ""
 }
 
-func (s *Handler) authEmailMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		email := getHeaderCaseInsensitive(r, "X-Auth-Request-Email")
-		if email == "" {
-			http.Error(w, "Unauthorized: Missing X-Auth-Request-Email header", http.StatusUnauthorized)
-			return
-		}
-		// Email header exists, proceed to the next handler
-		next(w, r)
-	}
-}
-
+// authTokenMiddleware authenticates the X-Auth-Token (or Authorization)
+// header against Guardian and stores the resolved identity in the request
+// context. Accepts Guardian user JWTs and dch_ API keys.
 func (s *Handler) authTokenMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tokenHeader := getHeaderCaseInsensitive(r, "X-Auth-Token")
-		if tokenHeader == "" {
+		credential := getHeaderCaseInsensitive(r, "X-Auth-Token")
+		if credential == "" {
+			credential = getHeaderCaseInsensitive(r, "Authorization")
+		}
+		if credential == "" {
 			http.Error(w, "Unauthorized: Missing X-Auth-Token header", http.StatusUnauthorized)
 			return
 		}
 
-		// Validate JWT token
-		token, err := jwt.ParseWithClaims(tokenHeader, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-			// Validate the signing method
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
-			return []byte(s.options.GetJWTSecret()), nil
-		})
-
+		identity, err := s.verifier.Verify(r.Context(), credential)
 		if err != nil {
-			s.l.Error("token validation failed", "err", err)
-			http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
+			if errors.Is(err, guardian.ErrInvalidCredential) {
+				s.l.Info("rejected credential", "err", err.Error())
+				http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
+			} else {
+				s.l.Error("guardian verification failed", "err", err.Error())
+				http.Error(w, "Auth service unavailable", http.StatusBadGateway)
+			}
 			return
 		}
 
-		if claims, ok := token.Claims.(*Claims); ok && token.Valid {
-			// Add claims to request context
-			r = r.WithContext(context.WithValue(r.Context(), claimsContextKey, claims))
-			next(w, r)
-		} else {
-			http.Error(w, "Unauthorized: Invalid token claims", http.StatusUnauthorized)
-		}
+		r = r.WithContext(context.WithValue(r.Context(), identityContextKey, identity))
+		next(w, r)
 	}
-}
-
-func (s *Handler) HandleGenerateToken(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Get email from header
-	email := getHeaderCaseInsensitive(r, "X-Auth-Request-Email")
-	if email == "" {
-		http.Error(w, "Unauthorized: Missing X-Auth-Request-Email header", http.StatusUnauthorized)
-		return
-	}
-
-	// Create JWT token with claims
-	expirationTime := time.Now().Add(s.options.GetTokenExpiry())
-	claims := &Claims{
-		Email:  email,
-		Scopes: []string{"tunnel:create"}, // Changed from tunnel:register, tunnel:access to just tunnel:create
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expirationTime),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "tiny-tunnel",
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(s.options.GetJWTSecret()))
-	if err != nil {
-		s.l.Error("error signing token", "err", err)
-		http.Error(w, "Error generating token", http.StatusInternalServerError)
-		return
-	}
-
-	// Return the JWT token as JSON
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(fmt.Sprintf(`{"token":"%s","expires":"%s"}`, tokenString, expirationTime.Format(time.RFC3339))))
 }
 
 func (s *Handler) HandleAuthTest(w http.ResponseWriter, r *http.Request) {
-	// Get claims from context (already validated by authTokenMiddleware)
-	claims, ok := r.Context().Value(claimsContextKey).(*Claims)
+	// Identity was resolved by authTokenMiddleware.
+	identity, ok := r.Context().Value(identityContextKey).(guardian.Identity)
 	if !ok {
 		http.Error(w, "unauthorized: token validation failed", http.StatusUnauthorized)
 		return
 	}
 
-	// Return the token information as JSON
+	expires := ""
+	if !identity.ExpiresAt.IsZero() {
+		expires = identity.ExpiresAt.Format(time.RFC3339)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(fmt.Sprintf(`{
-		"valid": true,
-		"email": "%s",
-		"scopes": %q,
-		"expires": "%s"
-	}`, claims.Email, claims.Scopes, claims.ExpiresAt.Time.Format(time.RFC3339))))
+	json.NewEncoder(w).Encode(map[string]any{
+		"valid":       true,
+		"email":       identity.Email,
+		"user":        identity.String(),
+		"sub":         identity.Sub,
+		"auth_method": identity.Method,
+		"expires":     expires,
+	})
 }
 
 func (s *Handler) HandleTunnelRequest(w http.ResponseWriter, r *http.Request) {

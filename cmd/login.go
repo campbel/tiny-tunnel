@@ -1,6 +1,3 @@
-/*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
@@ -13,62 +10,69 @@ import (
 	"time"
 
 	"github.com/campbel/tiny-tunnel/core/client"
+	"github.com/campbel/tiny-tunnel/internal/guardian"
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
+var (
+	loginGuardianURL  string
+	loginClientID     string
+	loginCallbackPort int
+	loginPasteToken   bool
+)
+
 // loginCmd represents the login command
 var loginCmd = &cobra.Command{
 	Use:   "login [server]",
-	Short: "Login to a tunnel server",
-	Long: `Login to a tunnel server by opening the auth page in your browser.
-Copy the generated token and paste it into the terminal prompt.
+	Short: "Login to a tunnel server via Guardian",
+	Long: `Login to a tunnel server. Authentication is handled by Guardian:
+a browser window opens for SSO, and the resulting token is stored for the
+given tunnel server.
+
+Alternatively pass --paste to enter a credential manually (e.g. a Guardian
+API key starting with dch_).
 
 Examples:
-  tnl login tnl.campbel.io
+  tnl login tnl.stable.dexus.io
   tnl login localhost:8080
-  tnl login http://localhost:8080
-  tnl login https://example.com:8443`,
+  tnl login tnl.stable.dexus.io --paste`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.NewBasicLogger(os.Getenv("DEBUG") == "true")
-		serverArg := args[0]
+		originalServer := args[0]
 
-		// Parse server into a proper URL
-		serverURL, err := parseServerURL(serverArg)
-		if err != nil {
-			return err
-		}
-
-		// Save original server string for config
-		originalServer := serverArg
-
-		// Create login URL
-		loginURL, err := url.JoinPath(serverURL.String(), "login")
-		if err != nil {
-			return fmt.Errorf("failed to join path: %w", err)
-		}
-
-		fmt.Printf("Opening %s in your browser...\n", loginURL)
-		if err := openBrowser(loginURL); err != nil {
-			fmt.Printf("Failed to open browser automatically. Please open this URL manually: %s\n", loginURL)
-		}
-
-		fmt.Println("\nA JWT token has been generated in your browser.")
-		fmt.Println("Click the Copy button in the browser, then paste the token here.")
-		fmt.Print("Token: ")
-
-		// Read token (password-style input for security)
-		tokenBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-		if err != nil {
-			return err
-		}
-		fmt.Println()
-
-		token := strings.TrimSpace(string(tokenBytes))
-		if token == "" {
-			return fmt.Errorf("token cannot be empty")
+		var token string
+		if loginPasteToken {
+			fmt.Println("Paste a Guardian credential (API key dch_... or access token).")
+			fmt.Print("Credential: ")
+			tokenBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+			if err != nil {
+				return err
+			}
+			fmt.Println()
+			token = strings.TrimSpace(string(tokenBytes))
+			if token == "" {
+				return fmt.Errorf("credential cannot be empty")
+			}
+		} else {
+			result, err := guardian.Login(cmd.Context(), guardian.LoginConfig{
+				GuardianURL:  loginGuardianURL,
+				ClientID:     loginClientID,
+				CallbackPort: loginCallbackPort,
+				OpenBrowser:  openBrowser,
+				AuthURLCallback: func(url string) {
+					fmt.Printf("Opening your browser for SSO login...\n\nIf it doesn't open automatically, visit:\n%s\n\n", url)
+				},
+			})
+			if err != nil {
+				return fmt.Errorf("guardian login failed: %w", err)
+			}
+			token = result.AccessToken
+			if result.ExpiresIn > 0 {
+				fmt.Printf("Received access token (valid for %s).\n", (time.Duration(result.ExpiresIn) * time.Second).String())
+			}
 		}
 
 		// Save token to config with original server string to preserve all details
@@ -90,25 +94,19 @@ Examples:
 			return err
 		}
 
-		// Extract and show token details in a friendly way
 		fmt.Printf("\nLogin successful! Token verified with the following details:\n")
 
-		if email, ok := details["email"].(string); ok {
+		if user, ok := details["user"].(string); ok && user != "" {
+			fmt.Printf("- User: %s\n", user)
+		} else if email, ok := details["email"].(string); ok && email != "" {
 			fmt.Printf("- User: %s\n", email)
 		}
 
-		if scopes, ok := details["scopes"].([]interface{}); ok && len(scopes) > 0 {
-			fmt.Print("- Permissions: ")
-			for i, scope := range scopes {
-				if i > 0 {
-					fmt.Print(", ")
-				}
-				fmt.Print(scope)
-			}
-			fmt.Println()
+		if method, ok := details["auth_method"].(string); ok && method != "" {
+			fmt.Printf("- Auth method: %s\n", method)
 		}
 
-		if expiresStr, ok := details["expires"].(string); ok {
+		if expiresStr, ok := details["expires"].(string); ok && expiresStr != "" {
 			if expires, err := time.Parse(time.RFC3339, expiresStr); err == nil {
 				fmt.Printf("- Expires: %s\n", expires.Format("2006-01-02 15:04:05"))
 			}
@@ -125,6 +123,10 @@ tnl start --name myapp --target http://localhost:8080
 
 func init() {
 	rootCmd.AddCommand(loginCmd)
+	loginCmd.Flags().StringVar(&loginGuardianURL, "guardian-url", "https://id.stable.dexus.io", "Guardian base URL")
+	loginCmd.Flags().StringVar(&loginClientID, "client-id", "svc_tiny-tunnel_stable", "Guardian service client ID")
+	loginCmd.Flags().IntVar(&loginCallbackPort, "callback-port", 8085, "Localhost port for the OAuth callback (must be registered in Guardian)")
+	loginCmd.Flags().BoolVar(&loginPasteToken, "paste", false, "Paste a credential manually instead of the browser SSO flow")
 }
 
 // parseServerURL parses a server string into a URL
@@ -150,18 +152,20 @@ func parseServerURL(server string) (*url.URL, error) {
 
 // openBrowser opens the specified URL in the default browser
 func openBrowser(url string) error {
-	var cmd *exec.Cmd
+	var cmd string
+	var args []string
 
 	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	default:
-		return fmt.Errorf("unsupported platform")
+		cmd = "cmd"
+		args = []string{"/c", "start", url}
+	case "darwin":
+		cmd = "open"
+		args = []string{url}
+	default: // "linux", "freebsd", etc.
+		cmd = "xdg-open"
+		args = []string{url}
 	}
 
-	return cmd.Start()
+	return exec.Command(cmd, args...).Start()
 }

@@ -15,11 +15,13 @@ import (
 )
 
 var (
-	port         string
-	hostname     string
-	enableAuth   bool
-	accessPort   string
-	accessScheme string
+	port             string
+	hostname         string
+	enableAuth       bool
+	guardianURL      string
+	guardianAudience string
+	accessPort       string
+	accessScheme     string
 )
 
 // serveCmd represents the serve command
@@ -34,10 +36,12 @@ var serveCmd = &cobra.Command{
 		ctx := cmd.Context()
 
 		router := server.NewHandler(server.Options{
-			Hostname:     hostname,
-			EnableAuth:   enableAuth,
-			AccessScheme: accessScheme,
-			AccessPort:   accessPort,
+			Hostname:         hostname,
+			EnableAuth:       enableAuth,
+			GuardianURL:      guardianURL,
+			GuardianAudience: guardianAudience,
+			AccessScheme:     accessScheme,
+			AccessPort:       accessPort,
 		}, logger)
 
 		server := &http.Server{
@@ -71,7 +75,9 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 	serveCmd.Flags().StringVarP(&port, "port", "p", "8080", "Port to listen on")
 	serveCmd.Flags().StringVarP(&hostname, "hostname", "", "localhost", "Hostname to listen on")
-	serveCmd.Flags().BoolVarP(&enableAuth, "enable-auth", "", false, "Enable authentication")
+	serveCmd.Flags().BoolVarP(&enableAuth, "enable-auth", "", false, "Enable authentication (credentials verified against Guardian)")
+	serveCmd.Flags().StringVarP(&guardianURL, "guardian-url", "", "https://id.stable.dexus.io", "Guardian base URL used to verify credentials")
+	serveCmd.Flags().StringVarP(&guardianAudience, "guardian-audience", "", "svc_tiny-tunnel_stable", "Guardian service client ID expected in JWT aud claims (empty skips the check)")
 	serveCmd.Flags().StringVarP(&accessPort, "access-port", "", "", "Port to access the tunnel on")
 	serveCmd.Flags().StringVarP(&accessScheme, "access-scheme", "", "https", "Scheme to access the tunnel on")
 }
