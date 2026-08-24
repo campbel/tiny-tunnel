@@ -83,6 +83,12 @@ func NewHandler(options Options, logger log.Logger) http.Handler {
 
 	router := mux.NewRouter()
 	router.Host(fmt.Sprintf("{tunnel:[a-z0-9-]+}.%s", options.Hostname)).HandlerFunc(server.HandleTunnelRequest)
+	if options.PublicHostname != "" {
+		// Tunnel-proxy traffic only -- deliberately not registered against
+		// /register, /device, or the UI routes below, so the management API
+		// stays reachable solely via Hostname (see PublicHostname doc comment).
+		router.Host(fmt.Sprintf("{tunnel:[a-z0-9-]+}.%s", options.PublicHostname)).HandlerFunc(server.HandleTunnelRequest)
+	}
 
 	if options.EnableAuth {
 		// Wrap /register with Guardian auth middleware. Credentials are
