@@ -119,6 +119,88 @@ func TestServerConnectWithClient(t *testing.T) {
 
 }
 
+func TestServerConnectWithClientOnPublicHostname(t *testing.T) {
+	assert := assert.New(t)
+	randomString := uuid.New().String()
+
+	appServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, randomString)
+	}))
+	defer appServer.Close()
+
+	// PublicHostname is a second hostname that only carries tunnel-proxy
+	// traffic (see Options.PublicHostname doc comment); Hostname remains
+	// the one used for registration/management endpoints.
+	server := httptest.NewServer(server.NewHandler(server.Options{
+		Hostname:       "example.com",
+		PublicHostname: "public.example.com",
+	}, log.NewTestLogger()))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	if !assert.NoError(err) {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client, err := client.NewTunnel(ctx, client.Options{
+		Name:       "test",
+		ServerHost: serverURL.Hostname(),
+		ServerPort: serverURL.Port(),
+		Insecure:   true,
+		Target:     appServer.URL,
+	}, stats.NewTestStateProvider(), stats.NewTestStatsProvider(), log.NewTestLogger())
+
+	if !assert.NoError(err) {
+		return
+	}
+
+	go client.Listen(ctx)
+
+	// A request Host'd on PublicHostname should reach the same tunnel that
+	// registered over Hostname.
+	request, err := http.NewRequest("GET", server.URL, nil)
+	if !assert.NoError(err) {
+		return
+	}
+	request.Host = "test.public.example.com"
+
+	response, err := http.DefaultClient.Do(request)
+	if !assert.NoError(err) {
+		return
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if !assert.NoError(err) {
+		return
+	}
+
+	assert.Equal(http.StatusOK, response.StatusCode)
+	assert.Equal(randomString, string(body))
+
+	// A request against the bare Hostname (no PublicHostname) route still
+	// works too -- adding PublicHostname is additive, not a replacement.
+	request2, err := http.NewRequest("GET", server.URL, nil)
+	if !assert.NoError(err) {
+		return
+	}
+	request2.Host = "test.example.com"
+
+	response2, err := http.DefaultClient.Do(request2)
+	if !assert.NoError(err) {
+		return
+	}
+
+	body2, err := io.ReadAll(response2.Body)
+	if !assert.NoError(err) {
+		return
+	}
+
+	assert.Equal(http.StatusOK, response2.StatusCode)
+	assert.Equal(randomString, string(body2))
+}
+
 func TestServerTunnel(t *testing.T) {
 	assert := assert.New(t)
 

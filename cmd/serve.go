@@ -17,6 +17,7 @@ import (
 var (
 	port             string
 	hostname         string
+	publicHostname   string
 	enableAuth       bool
 	guardianURL      string
 	guardianAudience string
@@ -38,6 +39,7 @@ var serveCmd = &cobra.Command{
 
 		router := server.NewHandler(server.Options{
 			Hostname:         hostname,
+			PublicHostname:   publicHostname,
 			EnableAuth:       enableAuth,
 			GuardianURL:      guardianURL,
 			GuardianAudience: guardianAudience,
@@ -78,6 +80,7 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 	serveCmd.Flags().StringVarP(&port, "port", "p", "8080", "Port to listen on")
 	serveCmd.Flags().StringVarP(&hostname, "hostname", "", "localhost", "Hostname to listen on")
+	serveCmd.Flags().StringVarP(&publicHostname, "public-hostname", "", "", "Optional second hostname to additionally serve tunnel-proxy traffic on (not the management API: /register, /device, UI stay on --hostname only)")
 	serveCmd.Flags().BoolVarP(&enableAuth, "enable-auth", "", false, "Enable authentication (credentials verified against Guardian)")
 	serveCmd.Flags().StringVarP(&guardianURL, "guardian-url", "", "https://id.stable.dexus.io", "Guardian base URL used to verify credentials")
 	serveCmd.Flags().StringVarP(&guardianAudience, "guardian-audience", "", "svc_tiny-tunnel_stable", "Guardian service client ID expected in JWT aud claims (empty skips the check)")
