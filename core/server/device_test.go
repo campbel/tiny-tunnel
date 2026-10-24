@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/campbel/tiny-tunnel/core/client"
+	"github.com/campbel/tiny-tunnel/internal/guardian"
 	"github.com/campbel/tiny-tunnel/internal/log"
 	"github.com/campbel/tiny-tunnel/internal/tunneltoken"
 	"github.com/gorilla/websocket"
@@ -18,27 +21,80 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// startFakeGuardianWithLogin extends the fake Guardian with the /auth/login
-// token-flow endpoint used by the device flow: it immediately "approves" the
-// SSO and redirects back to the provided redirect_uri with ?token=&state=.
+// startFakeGuardianWithLogin extends the fake Guardian with the
+// /oauth/authorize + /oauth/token PKCE code-flow endpoints used by the device
+// flow: /oauth/authorize validates the PKCE challenge and redirects back to
+// redirect_uri with ?code=&state=, and /oauth/token verifies code_verifier and
+// returns a signed Guardian access token.
 func startFakeGuardianWithLogin(t *testing.T) (*httptest.Server, func() string) {
 	t.Helper()
-	guardian, mint, _ := startFakeGuardian(t)
+	gServer, mint, _ := startFakeGuardian(t)
 
-	base, ok := guardian.Config.Handler.(*http.ServeMux)
+	type codeEntry struct {
+		clientID      string
+		redirectURI   string
+		codeChallenge string
+	}
+	codes := map[string]codeEntry{}
+
+	base, ok := gServer.Config.Handler.(*http.ServeMux)
 	require.True(t, ok)
-	base.HandleFunc("/auth/login", func(w http.ResponseWriter, r *http.Request) {
+	base.HandleFunc("/oauth/authorize", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		redirect, err := url.Parse(q.Get("redirect_uri"))
+		assert.Equal(t, "code", q.Get("response_type"))
+		assert.Contains(t, q.Get("scope"), "openid")
+		assert.Equal(t, "S256", q.Get("code_challenge_method"))
+		require.NotEmpty(t, q.Get("code_challenge"))
+
+		redirectURI := q.Get("redirect_uri")
+		redirect, err := url.Parse(redirectURI)
 		require.NoError(t, err)
+
+		code := fmt.Sprintf("authcode-%d", len(codes)+1)
+		codes[code] = codeEntry{
+			clientID:      q.Get("client_id"),
+			redirectURI:   redirectURI,
+			codeChallenge: q.Get("code_challenge"),
+		}
+
 		rq := redirect.Query()
-		rq.Set("token", mint(validClaims(guardian.URL)))
+		rq.Set("code", code)
 		rq.Set("state", q.Get("state"))
 		redirect.RawQuery = rq.Encode()
 		http.Redirect(w, r, redirect.String(), http.StatusFound)
 	})
-	mintValid := func() string { return mint(validClaims(guardian.URL)) }
-	return guardian, mintValid
+	base.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		assert.Equal(t, "authorization_code", r.Form.Get("grant_type"))
+		code := r.Form.Get("code")
+		entry, ok := codes[code]
+		if !ok {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": "unknown code"})
+			return
+		}
+		delete(codes, code)
+
+		if r.Form.Get("client_id") != entry.clientID || r.Form.Get("redirect_uri") != entry.redirectURI {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": "mismatch"})
+			return
+		}
+		if guardian.S256Challenge(r.Form.Get("code_verifier")) != entry.codeChallenge {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": "pkce mismatch"})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"access_token": mint(validClaims(gServer.URL)),
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+		})
+	})
+	mintValid := func() string { return mint(validClaims(gServer.URL)) }
+	return gServer, mintValid
 }
 
 func newDeviceTestServer(t *testing.T, guardianURL string) *httptest.Server {
@@ -120,7 +176,9 @@ func TestDeviceFlowEndToEnd(t *testing.T) {
 	resp.Body.Close()
 	require.Equal(t, http.StatusFound, resp.StatusCode)
 	guardianLogin := resp.Header.Get("Location")
-	require.Contains(t, guardianLogin, "/auth/login")
+	require.Contains(t, guardianLogin, "/oauth/authorize")
+	require.Contains(t, guardianLogin, "code_challenge=")
+	require.Contains(t, guardianLogin, "code_challenge_method=S256")
 
 	resp, err = noRedirect.Get(guardianLogin)
 	require.NoError(t, err)
@@ -205,6 +263,22 @@ func TestCallbackRejectsForgedNonce(t *testing.T) {
 	require.NoError(t, err)
 	defer pollResp.Body.Close()
 	assert.Equal(t, http.StatusAccepted, pollResp.StatusCode, "auth should still be pending")
+}
+
+func TestCallbackSurfacesGuardianError(t *testing.T) {
+	guardian, _ := startFakeGuardianWithLogin(t)
+	server := newDeviceTestServer(t, guardian.URL)
+
+	cbURL := server.URL + "/auth/callback?error=access_denied&error_description=non-code+downstream+login+rejected"
+	resp, err := http.Get(cbURL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "access_denied")
+	assert.Contains(t, string(body), "non-code downstream login rejected")
 }
 
 func TestTokenExchange(t *testing.T) {

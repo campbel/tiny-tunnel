@@ -14,17 +14,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newFakeIdP implements Guardian's PAR + /auth/login flow: PAR stores the
-// pushed parameters, /auth/login consumes the single-use request_uri and
-// redirects back to the stored redirect_uri with ?token=...&state=...
+// newFakeIdP implements Guardian's PAR + /oauth/authorize + /oauth/token flow:
+// PAR stores the pushed parameters, /oauth/authorize consumes the single-use
+// request_uri and PKCE challenge and redirects back to the stored redirect_uri
+// with ?code=...&state=..., and /oauth/token verifies PKCE and issues the
+// access_token.
 func newFakeIdP(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	type parEntry struct {
+		clientID    string
 		redirectURI string
 		state       string
 	}
+	type codeEntry struct {
+		clientID      string
+		redirectURI   string
+		codeChallenge string
+	}
 	parStore := map[string]parEntry{}
+	codeStore := map[string]codeEntry{}
 
 	mux := http.NewServeMux()
 	var server *httptest.Server
@@ -36,24 +45,40 @@ func newFakeIdP(t *testing.T) *httptest.Server {
 		require.NotEmpty(t, redirectURI)
 
 		requestURI := "urn:guardian:par:test-" + fmt.Sprint(len(parStore))
-		parStore[requestURI] = parEntry{redirectURI: redirectURI, state: r.Form.Get("state")}
+		parStore[requestURI] = parEntry{
+			clientID:    r.Form.Get("client_id"),
+			redirectURI: redirectURI,
+			state:       r.Form.Get("state"),
+		}
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]any{"request_uri": requestURI, "expires_in": 90})
 	})
 
-	mux.HandleFunc("/auth/login", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/oauth/authorize", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		assert.Equal(t, "svc_test", q.Get("client_id"))
+		assert.Equal(t, "code", q.Get("response_type"))
+		assert.Contains(t, q.Get("scope"), "openid")
+		assert.Equal(t, "S256", q.Get("code_challenge_method"))
+		require.NotEmpty(t, q.Get("code_challenge"))
+
 		entry, ok := parStore[q.Get("request_uri")]
 		require.True(t, ok, "unknown or reused request_uri")
 		delete(parStore, q.Get("request_uri")) // single-use
 
-		// Simulate a successful SSO: redirect back with token + state.
+		authCode := "code-" + fmt.Sprint(len(codeStore)+1)
+		codeStore[authCode] = codeEntry{
+			clientID:      entry.clientID,
+			redirectURI:   entry.redirectURI,
+			codeChallenge: q.Get("code_challenge"),
+		}
+
+		// Simulate a successful SSO: redirect back with code + state.
 		redirect, err := url.Parse(entry.redirectURI)
 		require.NoError(t, err)
 		rq := redirect.Query()
-		rq.Set("token", "test-access-token")
+		rq.Set("code", authCode)
 		if entry.state != "" {
 			rq.Set("state", entry.state)
 		}
@@ -63,6 +88,37 @@ func newFakeIdP(t *testing.T) *httptest.Server {
 		require.NoError(t, err)
 		resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		assert.Equal(t, "authorization_code", r.Form.Get("grant_type"))
+		code := r.Form.Get("code")
+		entry, ok := codeStore[code]
+		if !ok {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": "unknown code"})
+			return
+		}
+		delete(codeStore, code) // single-use
+
+		if r.Form.Get("client_id") != entry.clientID || r.Form.Get("redirect_uri") != entry.redirectURI {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": "client_id or redirect_uri mismatch"})
+			return
+		}
+		if S256Challenge(r.Form.Get("code_verifier")) != entry.codeChallenge {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": "code_verifier mismatch"})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "test-access-token",
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+		})
 	})
 
 	server = httptest.NewServer(mux)
@@ -147,9 +203,9 @@ func TestLoginStateMismatchRejected(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]any{"request_uri": "urn:guardian:par:x", "expires_in": 90})
 	})
-	mux.HandleFunc("/auth/login", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/oauth/authorize", func(w http.ResponseWriter, r *http.Request) {
 		go func() {
-			resp, err := http.Get("http://localhost:18088/auth/callback?token=x&state=wrong")
+			resp, err := http.Get("http://localhost:18088/auth/callback?code=x&state=wrong")
 			if err == nil {
 				resp.Body.Close()
 			}
